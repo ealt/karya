@@ -42,11 +42,7 @@ export function registerArchiveCommand(program: Command, runtime: CliRuntime): v
     .argument("<id>", "Task id or prefix")
     .action(async (id: string, command: Command) => {
       await runtime.runCommand(command, async (context) => {
-        const write = await runtime.runWrite(
-          context,
-          async () => context.store.restoreTask(id, context.config.author),
-          `karya: restore task ${id}`,
-        );
+        const write = await runtime.runWrite(context, async () => context.store.restoreTask(id, context.config.author));
 
         return {
           ok: true,

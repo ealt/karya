@@ -2,8 +2,8 @@ import { mkdtemp, mkdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { initDataRepo, resolveConfig } from "../../src/core/config.js";
-import { GitSync } from "../../src/core/git-sync.js";
+import { resolveConfig } from "../../src/core/config.js";
+import { createBackend } from "../../src/core/create-backend.js";
 import { TaskStore } from "../../src/core/task-store.js";
 import { createWebApp } from "../../src/web/server.js";
 
@@ -11,19 +11,21 @@ describe("Web e2e", () => {
   it("serves html and supports API task lifecycle", async () => {
     const root = await mkdtemp(join(tmpdir(), "karya-web-e2e-"));
     const homeDir = join(root, "home");
-    const dataDir = join(root, "data");
+    const dbPath = join(root, "karya.db");
     await mkdir(homeDir, { recursive: true });
 
     const previousHome = process.env.HOME;
     process.env.HOME = homeDir;
-    try {
-      await initDataRepo(dataDir, "web-e2e");
-      const config = await resolveConfig({ dataDir, noSync: true, format: "json", author: "web-e2e" });
-      const store = new TaskStore(dataDir);
-      await store.ensureInitialized();
-      const sync = new GitSync(dataDir, "web-e2e");
 
-      const app = createWebApp({ config, store, sync });
+    let backend: Awaited<ReturnType<typeof createBackend>> | null = null;
+
+    try {
+      const config = await resolveConfig({ dbPath, format: "json", author: "web-e2e", skipLegacyCheck: true });
+      backend = await createBackend(config.backend);
+      const store = new TaskStore(backend);
+      await store.ensureInitialized();
+
+      const app = createWebApp({ config, store });
 
       const home = await app.request("/");
       expect(home.status).toBe(200);
@@ -74,6 +76,9 @@ describe("Web e2e", () => {
       expect(await detailHtml.text()).toContain("<form");
     } finally {
       process.env.HOME = previousHome;
+      if (backend) {
+        await backend.close();
+      }
     }
   });
 });

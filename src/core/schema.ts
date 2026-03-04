@@ -1,5 +1,6 @@
 import { z } from "zod";
 import {
+  DEFAULT_BACKEND_TYPE,
   DEFAULT_PRIORITY,
   DEFAULT_PROJECT,
   DEFAULT_SCHEMA_VERSION,
@@ -43,20 +44,21 @@ export const TaskSchema = z.object({
   conflicts: z.array(TaskConflictSchema).optional(),
 });
 
-export const RepoConfigSchema = z.object({
-  schemaVersion: z.number().int().positive().default(DEFAULT_SCHEMA_VERSION),
-  defaultProject: z.string().min(1).default(DEFAULT_PROJECT),
-  defaultPriority: PrioritySchema.default(DEFAULT_PRIORITY),
-  autoSync: z.boolean().default(true),
-  syncRetries: z.number().int().min(1).max(10).default(3),
-  fetchIntervalSeconds: z.number().int().min(0).default(0),
-});
+export const BackendConfigSchema = z.discriminatedUnion("type", [
+  z.object({
+    type: z.literal("sqlite").default(DEFAULT_BACKEND_TYPE),
+    dbPath: z.string().min(1),
+  }),
+  z.object({
+    type: z.literal("pg"),
+    connectionString: z.string().min(1),
+  }),
+]);
 
 export const AppConfigSchema = z.object({
-  dataDir: z.string().min(1),
+  backend: BackendConfigSchema.optional(),
   defaultProject: z.string().min(1).default(DEFAULT_PROJECT),
   defaultPriority: PrioritySchema.default(DEFAULT_PRIORITY),
-  autoSync: z.boolean().default(true),
   author: z.string().min(1).default("cli"),
   web: z.object({
     port: z.number().int().min(1).max(65535).default(DEFAULT_WEB_PORT),
@@ -76,6 +78,6 @@ export type TaskStatus = z.infer<typeof StatusSchema>;
 export type TaskNote = z.infer<typeof TaskNoteSchema>;
 export type TaskConflict = z.infer<typeof TaskConflictSchema>;
 export type Task = z.infer<typeof TaskSchema>;
-export type RepoConfig = z.infer<typeof RepoConfigSchema>;
+export type BackendConfig = z.infer<typeof BackendConfigSchema>;
 export type AppConfig = z.infer<typeof AppConfigSchema>;
 export type ListFilters = z.infer<typeof ListFiltersSchema>;

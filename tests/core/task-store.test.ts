@@ -1,27 +1,20 @@
-import { mkdtemp } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { TaskStore } from "../../src/core/task-store.js";
+import { SqliteBackend } from "../../src/core/backends/sqlite.js";
 import { KaryaError } from "../../src/core/errors.js";
+import { TaskStore } from "../../src/core/task-store.js";
 
-const dirs: string[] = [];
+const backends: SqliteBackend[] = [];
 
 async function createStore(): Promise<TaskStore> {
-  const dir = await mkdtemp(join(tmpdir(), "karya-test-"));
-  dirs.push(dir);
-  const store = new TaskStore(dir);
+  const backend = new SqliteBackend(":memory:");
+  backends.push(backend);
+  const store = new TaskStore(backend);
   await store.ensureInitialized();
   return store;
 }
 
 afterEach(async () => {
-  await Promise.allSettled(
-    dirs.splice(0).map(async (dir) => {
-      const { rm } = await import("node:fs/promises");
-      await rm(dir, { recursive: true, force: true });
-    }),
-  );
+  await Promise.allSettled(backends.splice(0).map((backend) => backend.close()));
 });
 
 describe("TaskStore", () => {

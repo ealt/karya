@@ -9,11 +9,7 @@ export function registerDeleteCommand(program: Command, runtime: CliRuntime): vo
     .option("--archive", "Allow deleting from archive")
     .action(async (id: string, options: Record<string, boolean | undefined>, command: Command) => {
       await runtime.runCommand(command, async (context) => {
-        const write = await runtime.runWrite(
-          context,
-          async () => context.store.deleteTask(id, options.archive === true),
-          `karya: delete task ${id}`,
-        );
+        const write = await runtime.runWrite(context, async () => context.store.deleteTask(id, options.archive === true));
 
         return {
           ok: true,

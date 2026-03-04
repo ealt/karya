@@ -9,6 +9,11 @@ while [ -L "$SOURCE" ]; do
 done
 SCRIPT_DIR="$(cd "$(dirname "$SOURCE")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+DIST_ENTRY="${PROJECT_ROOT}/dist/src/cli/index.js"
+
+if [ -f "$DIST_ENTRY" ]; then
+  exec node "$DIST_ENTRY" "$@"
+fi
 
 if command -v bun >/dev/null 2>&1; then
   exec bun run "${PROJECT_ROOT}/src/cli/index.ts" "$@"

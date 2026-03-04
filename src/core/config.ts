@@ -1,43 +1,33 @@
-import { access, mkdir, readFile, writeFile } from "node:fs/promises";
+import { access, mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { constants as fsConstants } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
-import { AppConfigSchema, RepoConfigSchema, type AppConfig, type Priority, type RepoConfig } from "./schema.js";
-import { migrateRepoConfig } from "./migrate.js";
-import { DEFAULT_DATA_DIR, DEFAULT_FORMAT, DEFAULT_PRIORITY, DEFAULT_PROJECT } from "../shared/constants.js";
+import { dirname, join } from "node:path";
+import { KaryaError } from "./errors.js";
+import { AppConfigSchema, type AppConfig, type BackendConfig, type Priority } from "./schema.js";
+import { DEFAULT_BACKEND_TYPE, DEFAULT_FORMAT, DEFAULT_PRIORITY, DEFAULT_PROJECT } from "../shared/constants.js";
 
 export type OutputFormat = "human" | "json";
 
 export interface ResolveConfigOptions {
   dataDir?: string;
+  dbPath?: string;
+  backendType?: "sqlite" | "pg";
+  connectionString?: string;
   format?: OutputFormat;
-  noSync?: boolean;
   author?: string;
+  skipLegacyCheck?: boolean;
 }
 
 export interface ResolvedConfig {
-  dataDir: string;
+  backend: BackendConfig;
   format: OutputFormat;
-  noSync: boolean;
-  autoSync: boolean;
   author: string;
   webPort: number;
   defaultProject: string;
   defaultPriority: Priority;
-  syncRetries: number;
-  fetchIntervalSeconds: number;
   appConfigPath: string;
-  repoConfigPath: string;
+  skipLegacyCheck: boolean;
 }
-
-const DEFAULT_APP_CONFIG: AppConfig = {
-  dataDir: DEFAULT_DATA_DIR,
-  defaultProject: DEFAULT_PROJECT,
-  defaultPriority: DEFAULT_PRIORITY,
-  autoSync: true,
-  author: "cli",
-  web: { port: 3000 },
-};
 
 function expandHome(path: string): string {
   if (path.startsWith("~/")) {
@@ -50,6 +40,7 @@ function parseBool(input: string | undefined): boolean | undefined {
   if (input === undefined) {
     return undefined;
   }
+
   const value = input.trim().toLowerCase();
   if (["1", "true", "yes", "on"].includes(value)) {
     return true;
@@ -57,6 +48,15 @@ function parseBool(input: string | undefined): boolean | undefined {
   if (["0", "false", "no", "off"].includes(value)) {
     return false;
   }
+
+  return undefined;
+}
+
+function parseBackendType(input: string | undefined): "sqlite" | "pg" | undefined {
+  if (input === "sqlite" || input === "pg") {
+    return input;
+  }
+
   return undefined;
 }
 
@@ -64,18 +64,70 @@ function parseFormat(input: string | undefined): OutputFormat | undefined {
   if (input === "human" || input === "json") {
     return input;
   }
+
   return undefined;
+}
+
+function sqliteBackend(dbPath: string): BackendConfig {
+  return {
+    type: "sqlite",
+    dbPath: expandHome(dbPath),
+  };
+}
+
+export function defaultDbPath(): string {
+  if (process.platform === "win32") {
+    const appData = process.env.APPDATA ?? join(homedir(), "AppData", "Roaming");
+    return join(appData, "karya", "karya.db");
+  }
+
+  if (process.platform === "darwin") {
+    return join(homedir(), "Library", "Application Support", "karya", "karya.db");
+  }
+
+  const dataHome = process.env.XDG_DATA_HOME ?? join(homedir(), ".local", "share");
+  return join(dataHome, "karya", "karya.db");
 }
 
 export function getAppConfigPath(): string {
   return join(homedir(), ".config", "karya", "karya.json");
 }
 
+const DEFAULT_APP_CONFIG: AppConfig = {
+  backend: sqliteBackend(defaultDbPath()),
+  defaultProject: DEFAULT_PROJECT,
+  defaultPriority: DEFAULT_PRIORITY,
+  author: "cli",
+  web: { port: 3000 },
+};
+
+function migrateLegacyConfig(parsed: Record<string, unknown>): Record<string, unknown> {
+  const next = { ...parsed };
+
+  if (!("backend" in next) && typeof next.dataDir === "string" && next.dataDir.length > 0) {
+    next.backend = sqliteBackend(join(expandHome(next.dataDir), "karya.db"));
+  }
+
+  delete next.dataDir;
+  delete next.autoSync;
+
+  return next;
+}
+
 export async function loadAppConfig(path = getAppConfigPath()): Promise<AppConfig> {
   try {
     const raw = await readFile(path, "utf8");
-    const parsed = JSON.parse(raw);
-    const merged = { ...DEFAULT_APP_CONFIG, ...parsed, web: { ...DEFAULT_APP_CONFIG.web, ...(parsed.web ?? {}) } };
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    const migrated = migrateLegacyConfig(parsed);
+    const merged = {
+      ...DEFAULT_APP_CONFIG,
+      ...migrated,
+      web: {
+        ...DEFAULT_APP_CONFIG.web,
+        ...(typeof migrated.web === "object" && migrated.web ? migrated.web : {}),
+      },
+    };
+
     return AppConfigSchema.parse(merged);
   } catch {
     return { ...DEFAULT_APP_CONFIG };
@@ -93,64 +145,91 @@ export async function saveAppConfig(patch: Record<string, unknown>, path = getAp
     },
   };
 
-  await mkdir(join(path, ".."), { recursive: true });
-  await writeFile(path, `${JSON.stringify(updated, null, 2)}\n`, "utf8");
-}
-
-export function getRepoConfigPath(dataDir: string): string {
-  return join(dataDir, "config.json");
-}
-
-export async function loadRepoConfig(dataDir: string): Promise<RepoConfig> {
-  try {
-    const raw = await readFile(getRepoConfigPath(dataDir), "utf8");
-    return migrateRepoConfig(JSON.parse(raw));
-  } catch {
-    return RepoConfigSchema.parse({});
-  }
-}
-
-export async function initDataRepo(dataDir: string, author = "cli"): Promise<void> {
-  const expanded = expandHome(dataDir);
-  await mkdir(join(expanded, "tasks"), { recursive: true });
-  await mkdir(join(expanded, "archive"), { recursive: true });
-  await mkdir(join(expanded, "projects"), { recursive: true });
-
-  const repoConfigPath = getRepoConfigPath(expanded);
-  try {
-    await access(repoConfigPath, fsConstants.F_OK);
-  } catch {
-    const repoDefaults = RepoConfigSchema.parse({});
-    await writeFile(repoConfigPath, `${JSON.stringify(repoDefaults, null, 2)}\n`, "utf8");
-  }
-
-  try {
-    await saveAppConfig({ dataDir: expanded, author });
-  } catch (error) {
-    const code = (error as NodeJS.ErrnoException).code;
-    if (code !== "EACCES" && code !== "EPERM") {
-      throw error;
-    }
-  }
+  const validated = AppConfigSchema.parse(updated);
+  await mkdir(dirname(path), { recursive: true });
+  await writeFile(path, `${JSON.stringify(validated, null, 2)}\n`, "utf8");
 }
 
 export async function setAppConfigValue(key: string, value: string): Promise<void> {
+  const current = await loadAppConfig();
+
   if (key === "web.port") {
-    await saveAppConfig({ web: { port: Number(value) } });
+    const port = Number(value);
+    if (!Number.isInteger(port) || port <= 0 || port > 65535) {
+      throw new KaryaError(`Invalid web.port: ${value}`, "CONFIG");
+    }
+
+    await saveAppConfig({ web: { port } });
     return;
   }
 
-  if (["dataDir", "defaultProject", "defaultPriority", "author"].includes(key)) {
+  if (key === "author" || key === "defaultProject" || key === "defaultPriority") {
     await saveAppConfig({ [key]: value });
     return;
   }
 
-  if (key === "autoSync") {
-    await saveAppConfig({ autoSync: parseBool(value) ?? true });
+  if (key === "backend.type") {
+    if (value === "sqlite") {
+      const existingPath =
+        current.backend?.type === "sqlite" && current.backend.dbPath.length > 0
+          ? current.backend.dbPath
+          : defaultDbPath();
+      await saveAppConfig({ backend: sqliteBackend(existingPath) });
+      return;
+    }
+
+    if (value === "pg") {
+      if (current.backend?.type === "pg") {
+        await saveAppConfig({ backend: { type: "pg", connectionString: current.backend.connectionString } });
+        return;
+      }
+
+      throw new KaryaError("Set backend.connectionString before switching backend.type to pg", "CONFIG");
+    }
+
+    throw new KaryaError(`Invalid backend.type: ${value}`, "CONFIG");
+  }
+
+  if (key === "backend.dbPath") {
+    await saveAppConfig({ backend: sqliteBackend(value) });
     return;
   }
 
-  throw new Error(`Unknown config key: ${key}`);
+  if (key === "backend.connectionString") {
+    await saveAppConfig({ backend: { type: "pg", connectionString: value } });
+    return;
+  }
+
+  if (key === "dataDir") {
+    await saveAppConfig({ backend: sqliteBackend(join(expandHome(value), "karya.db")) });
+    return;
+  }
+
+  throw new KaryaError(`Unknown config key: ${key}`, "CONFIG");
+}
+
+function resolveSqlitePath(options: ResolveConfigOptions, appConfig: AppConfig): string {
+  if (typeof options.dbPath === "string" && options.dbPath.length > 0) {
+    return expandHome(options.dbPath);
+  }
+
+  if (typeof options.dataDir === "string" && options.dataDir.length > 0) {
+    return join(expandHome(options.dataDir), "karya.db");
+  }
+
+  if (typeof process.env.KARYA_DB_PATH === "string" && process.env.KARYA_DB_PATH.length > 0) {
+    return expandHome(process.env.KARYA_DB_PATH);
+  }
+
+  if (typeof process.env.KARYA_DATA_DIR === "string" && process.env.KARYA_DATA_DIR.length > 0) {
+    return join(expandHome(process.env.KARYA_DATA_DIR), "karya.db");
+  }
+
+  if (appConfig.backend?.type === "sqlite") {
+    return expandHome(appConfig.backend.dbPath);
+  }
+
+  return defaultDbPath();
 }
 
 export async function resolveConfig(options: ResolveConfigOptions = {}): Promise<ResolvedConfig> {
@@ -158,27 +237,61 @@ export async function resolveConfig(options: ResolveConfigOptions = {}): Promise
   const appConfigPath = getAppConfigPath();
   const appConfig = await loadAppConfig(appConfigPath);
 
-  const dataDir = expandHome(options.dataDir ?? env.KARYA_DATA_DIR ?? appConfig.dataDir ?? DEFAULT_DATA_DIR);
-  const repoConfigPath = getRepoConfigPath(dataDir);
-  const repoConfig = await loadRepoConfig(dataDir);
+  const backendType = options.backendType ?? parseBackendType(env.KARYA_BACKEND) ?? appConfig.backend?.type ?? DEFAULT_BACKEND_TYPE;
 
-  const format = options.format ?? parseFormat(env.KARYA_FORMAT) ?? (DEFAULT_FORMAT as OutputFormat);
-  const noSync = options.noSync ?? parseBool(env.KARYA_NO_SYNC) ?? false;
+  let backend: BackendConfig;
+  if (backendType === "sqlite") {
+    backend = sqliteBackend(resolveSqlitePath(options, appConfig));
+  } else {
+    const connectionString =
+      options.connectionString ??
+      env.KARYA_PG_CONNECTION_STRING ??
+      (appConfig.backend?.type === "pg" ? appConfig.backend.connectionString : undefined);
 
-  const autoSync = appConfig.autoSync ?? repoConfig.autoSync;
+    if (!connectionString) {
+      throw new KaryaError("PostgreSQL backend requires connection string", "CONFIG");
+    }
+
+    backend = {
+      type: "pg",
+      connectionString,
+    };
+  }
 
   return {
-    dataDir,
-    format,
-    noSync,
-    autoSync,
+    backend,
+    format: options.format ?? parseFormat(env.KARYA_FORMAT) ?? (DEFAULT_FORMAT as OutputFormat),
     author: options.author ?? env.KARYA_AUTHOR ?? appConfig.author,
     webPort: appConfig.web.port,
-    defaultProject: appConfig.defaultProject ?? repoConfig.defaultProject,
-    defaultPriority: appConfig.defaultPriority ?? repoConfig.defaultPriority,
-    syncRetries: repoConfig.syncRetries,
-    fetchIntervalSeconds: repoConfig.fetchIntervalSeconds,
+    defaultProject: appConfig.defaultProject,
+    defaultPriority: appConfig.defaultPriority,
     appConfigPath,
-    repoConfigPath,
+    skipLegacyCheck: options.skipLegacyCheck ?? parseBool(env.KARYA_SKIP_LEGACY_CHECK) ?? false,
   };
+}
+
+export async function detectLegacyData(config: ResolvedConfig): Promise<string | null> {
+  if (config.backend.type !== "sqlite") {
+    return null;
+  }
+
+  const oldTasksDir = join(dirname(config.backend.dbPath), "tasks");
+  try {
+    await access(oldTasksDir, fsConstants.F_OK);
+    const entries = await readdir(oldTasksDir, { withFileTypes: true });
+    const hasJsonTasks = entries.some((entry) => entry.isFile() && entry.name.endsWith(".json"));
+
+    if (!hasJsonTasks) {
+      return null;
+    }
+
+    return [
+      "Legacy JSON task data detected.",
+      `Found: ${oldTasksDir}`,
+      "Run migration import before continuing:",
+      `  karya --db-path ${config.backend.dbPath} --skip-legacy-check import --input ${join(dirname(config.backend.dbPath))}`,
+    ].join("\n");
+  } catch {
+    return null;
+  }
 }

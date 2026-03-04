@@ -1,11 +1,11 @@
 import type { OutputFormat } from "../../core/config.js";
-import type { SyncWarning } from "../../core/git-sync.js";
+import type { Warning } from "../../shared/types.js";
 
 export interface CommandOutput {
   ok: boolean;
   message?: string;
   data?: unknown;
-  warnings?: SyncWarning[];
+  warnings?: Warning[];
 }
 
 export function render(output: CommandOutput, format: OutputFormat): void {

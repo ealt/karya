@@ -16,27 +16,24 @@ export function registerAddCommand(program: Command, runtime: CliRuntime): void 
     .option("--note <note>", "Initial note")
     .action(async (title: string, options: Record<string, string | undefined>, command: Command) => {
       await runtime.runCommand(command, async (context) => {
-        const write = await runtime.runWrite(
-          context,
-          async () =>
-            context.store.addTask(
-              {
-                title,
-                description: options.description,
-                project: options.project,
-                tags: runtime.parseCsv(options.tags),
-                priority: options.priority as Priority | undefined,
-                due: options.due,
-                parentId: options.parent,
-                note: options.note,
-              },
-              context.config.author,
-              {
-                project: context.config.defaultProject,
-                priority: context.config.defaultPriority,
-              },
-            ),
-          "karya: add task",
+        const write = await runtime.runWrite(context, async () =>
+          context.store.addTask(
+            {
+              title,
+              description: options.description,
+              project: options.project,
+              tags: runtime.parseCsv(options.tags),
+              priority: options.priority as Priority | undefined,
+              due: options.due,
+              parentId: options.parent,
+              note: options.note,
+            },
+            context.config.author,
+            {
+              project: context.config.defaultProject,
+              priority: context.config.defaultPriority,
+            },
+          ),
         );
 
         return {

@@ -1,20 +1,11 @@
-import { readdir, readFile, rm } from "node:fs/promises";
-import { join } from "node:path";
 import { MIN_ID_PREFIX } from "../shared/constants.js";
+import type { Bucket, DbBackend } from "./backend.js";
+import { nowIso, parseDueInput } from "./dates.js";
 import { KaryaError } from "./errors.js";
-import { ensureDir, writeJsonAtomic } from "./fs.js";
-import { migrateTaskRecord } from "./migrate.js";
+import { createTaskId } from "./id.js";
 import { filterTasks } from "./query.js";
 import { reconcileTasks } from "./reconcile.js";
-import {
-  ListFiltersSchema,
-  type Priority,
-  type Task,
-  type TaskStatus,
-} from "./schema.js";
-import { nowIso, parseDueInput } from "./dates.js";
-import { createTaskId } from "./id.js";
-import { TaskSchema } from "./schema.js";
+import { ListFiltersSchema, TaskSchema, type Priority, type Task, type TaskStatus } from "./schema.js";
 
 export interface AddTaskInput {
   title: string;
@@ -39,8 +30,8 @@ export interface EditTaskInput {
 
 export interface TaskReference {
   task: Task;
-  path: string;
-  bucket: "tasks" | "archive";
+  id: string;
+  bucket: Bucket;
 }
 
 export interface ListTaskOptions {
@@ -52,21 +43,16 @@ export interface ListTaskOptions {
 }
 
 export class TaskStore {
-  readonly tasksDir: string;
-  readonly archiveDir: string;
-  readonly projectsDir: string;
+  private initializePromise: Promise<void> | null = null;
 
-  constructor(readonly dataDir: string) {
-    this.tasksDir = join(dataDir, "tasks");
-    this.archiveDir = join(dataDir, "archive");
-    this.projectsDir = join(dataDir, "projects");
-  }
+  constructor(private readonly backend: DbBackend) {}
 
   async ensureInitialized(): Promise<void> {
-    await ensureDir(this.dataDir);
-    await ensureDir(this.tasksDir);
-    await ensureDir(this.archiveDir);
-    await ensureDir(this.projectsDir);
+    if (!this.initializePromise) {
+      this.initializePromise = this.backend.initialize();
+    }
+
+    await this.initializePromise;
   }
 
   async addTask(input: AddTaskInput, author: string, defaults: { project: string; priority: Priority }): Promise<Task> {
@@ -106,20 +92,21 @@ export class TaskStore {
         : [],
     });
 
-    const written = await this.writeTask(task, "tasks");
-    return written;
+    return this.writeTask(task, "tasks");
   }
 
   async listTasks(options: ListTaskOptions = {}): Promise<Task[]> {
     await this.ensureInitialized();
-    const activeTasks = await this.readAllTasks(this.tasksDir);
-    const archiveTasks = options.includeArchive ? await this.readAllTasks(this.archiveDir) : [];
+    const activeTasks = await this.backend.getAllTasks("tasks");
+    const archiveTasks = options.includeArchive ? await this.backend.getAllTasks("archive") : [];
+
     const filters = ListFiltersSchema.parse({
       project: options.project,
       priority: options.priority,
       status: options.status,
       tag: options.tag,
     });
+
     return filterTasks([...activeTasks, ...archiveTasks], filters);
   }
 
@@ -139,6 +126,7 @@ export class TaskStore {
       throw new KaryaError(`Invalid due date: ${updates.due}`, "VALIDATION");
     }
 
+    const now = nowIso();
     const next: Task = TaskSchema.parse({
       ...ref.task,
       title: updates.title ?? ref.task.title,
@@ -147,7 +135,7 @@ export class TaskStore {
       tags: updates.tags ?? ref.task.tags,
       priority: updates.priority ?? ref.task.priority,
       dueAt,
-      updatedAt: nowIso(),
+      updatedAt: now,
       updatedBy: author,
       notes: updates.note
         ? [
@@ -155,14 +143,13 @@ export class TaskStore {
             {
               body: updates.note,
               author,
-              timestamp: nowIso(),
+              timestamp: now,
             },
           ]
         : ref.task.notes,
     });
 
-    const written = await this.writeTask(next, "tasks");
-    return written;
+    return this.writeTask(next, "tasks");
   }
 
   async startTask(idOrPrefix: string, author: string): Promise<Task> {
@@ -177,10 +164,10 @@ export class TaskStore {
     return this.transitionTask(idOrPrefix, "cancelled", author);
   }
 
-  async deleteTask(idOrPrefix: string, includeArchive = true): Promise<{ id: string; bucket: "tasks" | "archive" }> {
+  async deleteTask(idOrPrefix: string, includeArchive = true): Promise<{ id: string; bucket: Bucket }> {
     const ref = await this.resolveTaskReference(idOrPrefix, includeArchive);
-    await rm(ref.path, { force: true });
-    return { id: ref.task.id, bucket: ref.bucket };
+    await this.backend.deleteTask(ref.id, ref.bucket);
+    return { id: ref.id, bucket: ref.bucket };
   }
 
   async restoreTask(idOrPrefix: string, author: string): Promise<Task> {
@@ -198,24 +185,14 @@ export class TaskStore {
     });
 
     const written = await this.writeTask(restored, "tasks");
-    await rm(ref.path, { force: true });
+    await this.backend.deleteTask(ref.id, "archive");
     return written;
   }
 
   async listProjects(): Promise<string[]> {
     await this.ensureInitialized();
-    const tasks = await this.readAllTasks(this.tasksDir);
-    const fromTasks = new Set(tasks.map((task) => task.project));
-
-    const files = await readdir(this.projectsDir, { withFileTypes: true });
-    for (const entry of files) {
-      if (!entry.isFile() || !entry.name.endsWith(".json")) {
-        continue;
-      }
-      fromTasks.add(entry.name.replace(/\.json$/, ""));
-    }
-
-    return [...fromTasks].sort();
+    const tasks = await this.backend.getAllTasks("tasks");
+    return [...new Set(tasks.map((task) => task.project))].sort();
   }
 
   private async transitionTask(idOrPrefix: string, status: TaskStatus, author: string): Promise<Task> {
@@ -243,15 +220,13 @@ export class TaskStore {
     });
 
     const isTerminal = status === "done" || status === "cancelled";
-
     if (isTerminal) {
       const written = await this.writeTask(next, "archive");
-      await rm(ref.path, { force: true });
+      await this.backend.deleteTask(ref.id, "tasks");
       return written;
     }
 
-    const written = await this.writeTask(next, "tasks");
-    return written;
+    return this.writeTask(next, "tasks");
   }
 
   private async resolveTaskReference(idOrPrefix: string, includeArchive: boolean): Promise<TaskReference> {
@@ -263,23 +238,13 @@ export class TaskStore {
       );
     }
 
-    const buckets: Array<"tasks" | "archive"> = includeArchive ? ["tasks", "archive"] : ["tasks"];
+    const buckets: Bucket[] = includeArchive ? ["tasks", "archive"] : ["tasks"];
     const matches: TaskReference[] = [];
 
     for (const bucket of buckets) {
-      const dir = bucket === "tasks" ? this.tasksDir : this.archiveDir;
-      const files = await readdir(dir, { withFileTypes: true });
-      for (const entry of files) {
-        if (!entry.isFile() || !entry.name.endsWith(".json")) {
-          continue;
-        }
-        const id = entry.name.replace(/\.json$/, "");
-        if (!id.startsWith(trimmed)) {
-          continue;
-        }
-        const path = join(dir, entry.name);
-        const task = migrateTaskRecord(JSON.parse(await readFile(path, "utf8")));
-        matches.push({ task, path, bucket });
+      const bucketMatches = await this.backend.findByPrefix(trimmed, bucket);
+      for (const task of bucketMatches) {
+        matches.push({ task, id: task.id, bucket });
       }
     }
 
@@ -288,48 +253,31 @@ export class TaskStore {
     }
 
     if (matches.length > 1) {
-      const ids = matches.map((match) => match.task.id).sort();
+      const ids = matches.map((match) => match.id).sort();
       throw new KaryaError(`Task prefix is ambiguous: ${idOrPrefix} (${ids.join(", ")})`, "AMBIGUOUS_ID");
     }
 
     return matches[0];
   }
 
-  private async readAllTasks(dir: string): Promise<Task[]> {
-    const files = await readdir(dir, { withFileTypes: true });
-    const tasks: Task[] = [];
-    for (const entry of files) {
-      if (!entry.isFile() || !entry.name.endsWith(".json")) {
+  private async writeTask(task: Task, bucket: Bucket): Promise<Task> {
+    await this.ensureInitialized();
+
+    let next = task;
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      const result = await this.backend.putTask(next, bucket);
+      if (result.written) {
+        return next;
+      }
+
+      const existing = await this.backend.getTask(next.id, bucket);
+      if (!existing) {
         continue;
       }
-      const raw = await readFile(join(dir, entry.name), "utf8");
-      tasks.push(migrateTaskRecord(JSON.parse(raw)));
-    }
-    return tasks;
-  }
 
-  private async writeTask(task: Task, bucket: "tasks" | "archive"): Promise<Task> {
-    const dir = bucket === "tasks" ? this.tasksDir : this.archiveDir;
-    await ensureDir(dir);
-    const path = join(dir, `${task.id}.json`);
-    const merged = await this.reconcileWithExisting(path, task);
-    await writeJsonAtomic(path, merged);
-    return merged;
-  }
-
-  private async reconcileWithExisting(path: string, incoming: Task): Promise<Task> {
-    try {
-      const existing = migrateTaskRecord(JSON.parse(await readFile(path, "utf8")));
-      if (existing.updatedAt < incoming.updatedAt) {
-        return incoming;
-      }
-      return reconcileTasks(incoming, existing);
-    } catch (error) {
-      const code = (error as NodeJS.ErrnoException).code;
-      if (code === "ENOENT") {
-        return incoming;
-      }
-      throw error;
+      next = reconcileTasks(next, existing);
     }
+
+    throw new KaryaError(`Could not write task ${task.id} due to repeated conflicts`, "WRITE_CONFLICT");
   }
 }

@@ -1,8 +1,0 @@
-{
-  "schemaVersion": 1,
-  "defaultProject": "inbox",
-  "defaultPriority": "P2",
-  "autoSync": true,
-  "syncRetries": 3,
-  "fetchIntervalSeconds": 0
-}

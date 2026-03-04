@@ -16,7 +16,7 @@ export function registerServeCommand(program: Command, runtime: CliRuntime): voi
         }
 
         await context.store.ensureInitialized();
-        await startWebServer(context, port);
+        await startWebServer({ config: context.config, store: context.store }, port);
 
         return {
           ok: true,

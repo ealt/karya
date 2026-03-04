@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { migrateRepoConfig, migrateTaskRecord } from "../../src/core/migrate.js";
+import { migrateTaskRecord } from "../../src/core/migrate.js";
 
 describe("migrations", () => {
   it("migrates legacy task without schemaVersion", () => {
@@ -15,15 +15,5 @@ describe("migrations", () => {
     expect(task.schemaVersion).toBe(1);
     expect(task.status).toBe("open");
     expect(Array.isArray(task.conflicts)).toBe(true);
-  });
-
-  it("migrates legacy repo config without schemaVersion", () => {
-    const config = migrateRepoConfig({
-      defaultProject: "inbox",
-      autoSync: false,
-    });
-
-    expect(config.schemaVersion).toBe(1);
-    expect(config.autoSync).toBe(false);
   });
 });

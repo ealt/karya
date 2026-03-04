@@ -6,11 +6,12 @@ const program = new Command();
 
 program
   .name("karya")
-  .description("Git-backed task tracker for AI agent workflows")
-  .option("--data-dir <path>", "Override data directory")
+  .description("SQL-backed task tracker for orchestrating AI agents")
+  .option("--db-path <path>", "Override SQLite database path")
+  .option("--data-dir <path>", "Legacy alias; interpreted as <path>/karya.db")
   .option("--format <format>", "Output format: human|json")
-  .option("--no-sync", "Disable automatic sync")
   .option("--author <author>", "Author metadata for updates")
+  .option("--skip-legacy-check", "Skip legacy JSON task directory detection")
   .showHelpAfterError();
 
 registerCommands(program, createCliRuntime(program));

@@ -33,11 +33,7 @@ export function registerEditCommand(program: Command, runtime: CliRuntime): void
           throw new KaryaError("No edits provided.", "USAGE");
         }
 
-        const write = await runtime.runWrite(
-          context,
-          async () => context.store.editTask(id, patch, context.config.author),
-          `karya: edit task ${id}`,
-        );
+        const write = await runtime.runWrite(context, async () => context.store.editTask(id, patch, context.config.author));
 
         return {
           ok: true,

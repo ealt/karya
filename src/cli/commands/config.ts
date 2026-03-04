@@ -1,5 +1,5 @@
 import { Command } from "commander";
-import { initDataRepo, setAppConfigValue } from "../../core/config.js";
+import { saveAppConfig, setAppConfigValue } from "../../core/config.js";
 import type { CliRuntime } from "../shared/runtime.js";
 
 export function registerConfigCommand(program: Command, runtime: CliRuntime): void {
@@ -7,19 +7,24 @@ export function registerConfigCommand(program: Command, runtime: CliRuntime): vo
 
   config
     .command("init")
-    .description("Initialize data directory and repo config")
+    .description("Initialize configured backend")
     .action(async (_: unknown, command: Command) => {
       await runtime.runCommand(command, async (context) => {
-        await initDataRepo(context.config.dataDir, context.config.author);
-        await context.sync.initRepo();
+        await context.store.ensureInitialized();
+        await saveAppConfig({
+          backend: context.config.backend,
+          author: context.config.author,
+        });
 
         return {
           ok: true,
-          message: `Initialized data repo at ${context.config.dataDir}`,
+          message:
+            context.config.backend.type === "sqlite"
+              ? `Initialized sqlite backend at ${context.config.backend.dbPath}`
+              : "Initialized PostgreSQL backend",
           data: {
-            dataDir: context.config.dataDir,
+            backend: context.config.backend,
             appConfigPath: context.config.appConfigPath,
-            repoConfigPath: context.config.repoConfigPath,
           },
         };
       });

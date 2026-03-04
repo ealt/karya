@@ -1,24 +1,22 @@
 import { Command } from "commander";
-import { type OutputFormat, type ResolveConfigOptions, resolveConfig } from "../../core/config.js";
+import { detectLegacyData, type OutputFormat, type ResolveConfigOptions, resolveConfig } from "../../core/config.js";
+import { createBackend } from "../../core/create-backend.js";
 import { KaryaError } from "../../core/errors.js";
-import { GitSync, type SyncWarning } from "../../core/git-sync.js";
 import { TaskStore } from "../../core/task-store.js";
+import type { Warning } from "../../shared/types.js";
 import { render, type CommandOutput } from "../formatters/output.js";
+import type { DbBackend } from "../../core/backend.js";
 
 export interface CommandContext {
   config: Awaited<ReturnType<typeof resolveConfig>>;
   store: TaskStore;
-  sync: GitSync;
+  backend: DbBackend;
 }
 
 export interface CliRuntime {
   parseCsv(input?: string): string[] | undefined;
   runCommand(commandLike: unknown, handler: (context: CommandContext) => Promise<CommandOutput>): Promise<void>;
-  runWrite<T>(
-    context: CommandContext,
-    operation: () => Promise<T>,
-    commitMessage: string,
-  ): Promise<{ result: T; warnings: SyncWarning[] }>;
+  runWrite<T>(context: CommandContext, operation: () => Promise<T>): Promise<{ result: T; warnings: Warning[] }>;
 }
 
 function parseGlobalOptionsFromArgv(argv: string[]): ResolveConfigOptions {
@@ -27,8 +25,14 @@ function parseGlobalOptionsFromArgv(argv: string[]): ResolveConfigOptions {
   for (let index = 0; index < argv.length; index += 1) {
     const token = argv[index];
 
-    if (token === "--no-sync") {
-      parsed.noSync = true;
+    if (token === "--db-path" && index + 1 < argv.length) {
+      parsed.dbPath = argv[index + 1];
+      index += 1;
+      continue;
+    }
+
+    if (token.startsWith("--db-path=")) {
+      parsed.dbPath = token.split("=", 2)[1];
       continue;
     }
 
@@ -70,6 +74,11 @@ function parseGlobalOptionsFromArgv(argv: string[]): ResolveConfigOptions {
       parsed.author = token.split("=", 2)[1];
       continue;
     }
+
+    if (token === "--skip-legacy-check") {
+      parsed.skipLegacyCheck = true;
+      continue;
+    }
   }
 
   return parsed;
@@ -101,10 +110,12 @@ function getGlobalOptions(program: Command, commandLike: unknown): ResolveConfig
   const argvParsed = parseGlobalOptionsFromArgv(process.argv.slice(2));
 
   return {
+    dbPath: argvParsed.dbPath ?? (typeof opts.dbPath === "string" ? opts.dbPath : undefined),
     dataDir: argvParsed.dataDir ?? (typeof opts.dataDir === "string" ? opts.dataDir : undefined),
     format: argvParsed.format ?? (format === "json" || format === "human" ? format : undefined),
-    noSync: argvParsed.noSync ?? (typeof opts.noSync === "boolean" ? opts.noSync : undefined),
     author: argvParsed.author ?? (typeof opts.author === "string" ? opts.author : undefined),
+    skipLegacyCheck:
+      argvParsed.skipLegacyCheck ?? (typeof opts.skipLegacyCheck === "boolean" ? opts.skipLegacyCheck : undefined),
   };
 }
 
@@ -129,7 +140,7 @@ function toErrorMessage(error: unknown): string {
   return String(error);
 }
 
-function toConflictWarning(result: unknown): SyncWarning[] {
+function toConflictWarning(result: unknown): Warning[] {
   if (!result || typeof result !== "object") {
     return [];
   }
@@ -153,6 +164,20 @@ function toConflictWarning(result: unknown): SyncWarning[] {
   ];
 }
 
+function commandName(commandLike: unknown): string | null {
+  if (
+    commandLike &&
+    typeof commandLike === "object" &&
+    "name" in commandLike &&
+    typeof (commandLike as { name?: unknown }).name === "function"
+  ) {
+    const value = (commandLike as { name: () => unknown }).name();
+    return typeof value === "string" ? value : null;
+  }
+
+  return null;
+}
+
 export function createCliRuntime(program: Command): CliRuntime {
   return {
     parseCsv,
@@ -160,14 +185,25 @@ export function createCliRuntime(program: Command): CliRuntime {
     async runCommand(commandLike, handler) {
       const globalOptions = getGlobalOptions(program, commandLike);
       let format: OutputFormat = globalOptions.format ?? "human";
+      let backend: DbBackend | null = null;
 
       try {
         const config = await resolveConfig(globalOptions);
         format = config.format;
-        const store = new TaskStore(config.dataDir);
-        const sync = new GitSync(config.dataDir, config.author);
 
-        const output = await handler({ config, store, sync });
+        if (!config.skipLegacyCheck) {
+          const warning = await detectLegacyData(config);
+          if (warning) {
+            render({ ok: false, message: warning }, format);
+            process.exitCode = 1;
+            return;
+          }
+        }
+
+        backend = await createBackend(config.backend);
+        const store = new TaskStore(backend);
+
+        const output = await handler({ config, store, backend });
         render(output, format);
       } catch (error) {
         render(
@@ -178,22 +214,18 @@ export function createCliRuntime(program: Command): CliRuntime {
           format,
         );
         process.exitCode = 1;
+      } finally {
+        if (backend && commandName(commandLike) !== "serve") {
+          await backend.close();
+        }
       }
     },
 
-    async runWrite(context, operation, commitMessage) {
-      if (context.config.noSync || !context.config.autoSync) {
-        const result = await operation();
-        return {
-          result,
-          warnings: toConflictWarning(result),
-        };
-      }
-
-      const output = await context.sync.runWriteCycle(operation, commitMessage, context.config.syncRetries);
+    async runWrite(context, operation) {
+      const result = await operation();
       return {
-        result: output.result,
-        warnings: [...output.sync.warnings, ...toConflictWarning(output.result)],
+        result,
+        warnings: toConflictWarning(result),
       };
     },
   };

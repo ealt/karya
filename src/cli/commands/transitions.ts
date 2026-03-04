@@ -20,7 +20,7 @@ export function registerTransitionCommands(program: Command, runtime: CliRuntime
                 ? () => context.store.doneTask(id, context.config.author)
                 : () => context.store.cancelTask(id, context.config.author);
 
-          const write = await runtime.runWrite(context, operation, `karya: ${name} task ${id}`);
+          const write = await runtime.runWrite(context, operation);
           return {
             ok: true,
             message: `${name} ${write.result.id}`,

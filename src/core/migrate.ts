@@ -1,5 +1,5 @@
 import { KaryaError } from "./errors.js";
-import { RepoConfigSchema, TaskSchema, type RepoConfig, type Task } from "./schema.js";
+import { TaskSchema, type Task } from "./schema.js";
 
 function ensureRecord(value: unknown): Record<string, unknown> {
   if (value && typeof value === "object" && !Array.isArray(value)) {
@@ -21,18 +21,4 @@ export function migrateTaskRecord(raw: unknown): Task {
   }
 
   throw new KaryaError(`Unsupported task schema version: ${String(record.schemaVersion)}`, "VALIDATION");
-}
-
-export function migrateRepoConfig(raw: unknown): RepoConfig {
-  const record = ensureRecord(raw);
-  const version = typeof record.schemaVersion === "number" ? record.schemaVersion : 0;
-
-  if (version <= 1) {
-    return RepoConfigSchema.parse({
-      ...record,
-      schemaVersion: 1,
-    });
-  }
-
-  throw new KaryaError(`Unsupported repo schema version: ${String(record.schemaVersion)}`, "VALIDATION");
 }

@@ -3,14 +3,13 @@ import { Hono } from "hono";
 import { parseBody } from "hono/utils/body";
 import type { ResolvedConfig } from "../core/config.js";
 import { KaryaError } from "../core/errors.js";
-import { GitSync, type SyncWarning } from "../core/git-sync.js";
 import type { Priority, Task, TaskStatus } from "../core/schema.js";
 import { TaskStore, type EditTaskInput } from "../core/task-store.js";
+import type { Warning } from "../shared/types.js";
 
 export interface WebDependencies {
   config: ResolvedConfig;
   store: TaskStore;
-  sync: GitSync;
 }
 
 function escapeHtml(input: string): string {
@@ -114,7 +113,7 @@ function taskDetail(task: Task): string {
 </article>`;
 }
 
-function warningsBlock(warnings: SyncWarning[]): string {
+function warningsBlock(warnings: Warning[]): string {
   if (warnings.length === 0) {
     return "";
   }
@@ -124,7 +123,7 @@ function warningsBlock(warnings: SyncWarning[]): string {
     .join("")}</aside>`;
 }
 
-function page(tasks: Task[], warnings: SyncWarning[] = []): string {
+function page(tasks: Task[], warnings: Warning[] = []): string {
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -181,22 +180,35 @@ function parseStatus(value: unknown): TaskStatus | "open" {
   throw new KaryaError(`Unsupported status transition: ${String(value)}`, "VALIDATION");
 }
 
-async function runWrite<T>(
-  deps: WebDependencies,
-  operation: () => Promise<T>,
-  commitMessage: string,
-): Promise<{ result: T; warnings: SyncWarning[] }> {
-  if (deps.config.noSync || !deps.config.autoSync) {
-    return {
-      result: await operation(),
-      warnings: [],
-    };
+function toConflictWarning(result: unknown): Warning[] {
+  if (!result || typeof result !== "object") {
+    return [];
   }
 
-  const write = await deps.sync.runWriteCycle(operation, commitMessage, deps.config.syncRetries);
+  if (!("id" in result) || !("conflicts" in result)) {
+    return [];
+  }
+
+  const id = (result as { id?: unknown }).id;
+  const conflicts = (result as { conflicts?: unknown }).conflicts;
+
+  if (typeof id !== "string" || !Array.isArray(conflicts) || conflicts.length === 0) {
+    return [];
+  }
+
+  return [
+    {
+      code: "CONFLICT",
+      message: `Task ${id} includes ${conflicts.length} conflict marker(s).`,
+    },
+  ];
+}
+
+async function runWrite<T>(deps: WebDependencies, operation: () => Promise<T>): Promise<{ result: T; warnings: Warning[] }> {
+  const result = await operation();
   return {
-    result: write.result,
-    warnings: write.sync.warnings,
+    result,
+    warnings: toConflictWarning(result),
   };
 }
 
@@ -256,31 +268,28 @@ export function createWebApp(deps: WebDependencies): Hono {
       return c.text("title is required", 400);
     }
 
-    await runWrite(
-      deps,
-      async () =>
-        deps.store.addTask(
-          {
-            title,
-            description: typeof body.description === "string" ? body.description : undefined,
-            project: typeof body.project === "string" ? body.project : undefined,
-            priority: typeof body.priority === "string" ? (body.priority as Priority) : undefined,
-            tags:
-              typeof body.tags === "string"
-                ? body.tags
-                    .split(",")
-                    .map((tag) => tag.trim())
-                    .filter(Boolean)
-                : undefined,
-            due: typeof body.due === "string" ? body.due : undefined,
-          },
-          deps.config.author,
-          {
-            project: deps.config.defaultProject,
-            priority: deps.config.defaultPriority,
-          },
-        ),
-      "karya(web): add task",
+    await runWrite(deps, async () =>
+      deps.store.addTask(
+        {
+          title,
+          description: typeof body.description === "string" ? body.description : undefined,
+          project: typeof body.project === "string" ? body.project : undefined,
+          priority: typeof body.priority === "string" ? (body.priority as Priority) : undefined,
+          tags:
+            typeof body.tags === "string"
+              ? body.tags
+                  .split(",")
+                  .map((tag) => tag.trim())
+                  .filter(Boolean)
+              : undefined,
+          due: typeof body.due === "string" ? body.due : undefined,
+        },
+        deps.config.author,
+        {
+          project: deps.config.defaultProject,
+          priority: deps.config.defaultPriority,
+        },
+      ),
     );
 
     const tasks = await deps.store.listTasks();
@@ -292,22 +301,18 @@ export function createWebApp(deps: WebDependencies): Hono {
     const body = await parseBody(c.req.raw);
     const status = parseStatus(typeof body.status === "string" ? body.status : "");
 
-    await runWrite(
-      deps,
-      async () => {
-        if (status === "in_progress") {
-          return deps.store.startTask(id, deps.config.author);
-        }
-        if (status === "done") {
-          return deps.store.doneTask(id, deps.config.author);
-        }
-        if (status === "cancelled") {
-          return deps.store.cancelTask(id, deps.config.author);
-        }
-        return deps.store.restoreTask(id, deps.config.author);
-      },
-      `karya(web): status ${status} ${id}`,
-    );
+    await runWrite(deps, async () => {
+      if (status === "in_progress") {
+        return deps.store.startTask(id, deps.config.author);
+      }
+      if (status === "done") {
+        return deps.store.doneTask(id, deps.config.author);
+      }
+      if (status === "cancelled") {
+        return deps.store.cancelTask(id, deps.config.author);
+      }
+      return deps.store.restoreTask(id, deps.config.author);
+    });
 
     const tasks = await deps.store.listTasks();
     return c.html(taskList(tasks));
@@ -317,11 +322,7 @@ export function createWebApp(deps: WebDependencies): Hono {
     const id = c.req.param("id");
     const body = await parseBody(c.req.raw);
 
-    const write = await runWrite(
-      deps,
-      async () => deps.store.editTask(id, formBodyToEdit(body), deps.config.author),
-      `karya(web): edit ${id}`,
-    );
+    const write = await runWrite(deps, async () => deps.store.editTask(id, formBodyToEdit(body), deps.config.author));
 
     return c.html(`${warningsBlock(write.warnings)}${taskDetail(write.result)}`);
   });
@@ -339,27 +340,24 @@ export function createWebApp(deps: WebDependencies): Hono {
 
   app.post("/api/tasks", async (c) => {
     const body = await c.req.json<Record<string, unknown>>();
-    const write = await runWrite(
-      deps,
-      async () =>
-        deps.store.addTask(
-          {
-            title: String(body.title ?? "").trim(),
-            description: typeof body.description === "string" ? body.description : undefined,
-            project: typeof body.project === "string" ? body.project : undefined,
-            priority: typeof body.priority === "string" ? (body.priority as Priority) : undefined,
-            tags: Array.isArray(body.tags) ? body.tags.map(String) : undefined,
-            due: typeof body.due === "string" ? body.due : undefined,
-            parentId: typeof body.parentId === "string" ? body.parentId : null,
-            note: typeof body.note === "string" ? body.note : undefined,
-          },
-          deps.config.author,
-          {
-            project: deps.config.defaultProject,
-            priority: deps.config.defaultPriority,
-          },
-        ),
-      "karya(api): add task",
+    const write = await runWrite(deps, async () =>
+      deps.store.addTask(
+        {
+          title: String(body.title ?? "").trim(),
+          description: typeof body.description === "string" ? body.description : undefined,
+          project: typeof body.project === "string" ? body.project : undefined,
+          priority: typeof body.priority === "string" ? (body.priority as Priority) : undefined,
+          tags: Array.isArray(body.tags) ? body.tags.map(String) : undefined,
+          due: typeof body.due === "string" ? body.due : undefined,
+          parentId: typeof body.parentId === "string" ? body.parentId : null,
+          note: typeof body.note === "string" ? body.note : undefined,
+        },
+        deps.config.author,
+        {
+          project: deps.config.defaultProject,
+          priority: deps.config.defaultPriority,
+        },
+      ),
     );
 
     return c.json({ task: write.result, warnings: write.warnings }, 201);
@@ -369,23 +367,20 @@ export function createWebApp(deps: WebDependencies): Hono {
     const id = c.req.param("id");
     const body = await c.req.json<Record<string, unknown>>();
 
-    const write = await runWrite(
-      deps,
-      async () =>
-        deps.store.editTask(
-          id,
-          {
-            title: typeof body.title === "string" ? body.title : undefined,
-            description: typeof body.description === "string" ? body.description : undefined,
-            project: typeof body.project === "string" ? body.project : undefined,
-            priority: typeof body.priority === "string" ? (body.priority as Priority) : undefined,
-            tags: Array.isArray(body.tags) ? body.tags.map(String) : undefined,
-            due: typeof body.due === "string" ? body.due : body.due === null ? null : undefined,
-            note: typeof body.note === "string" ? body.note : undefined,
-          },
-          deps.config.author,
-        ),
-      `karya(api): edit ${id}`,
+    const write = await runWrite(deps, async () =>
+      deps.store.editTask(
+        id,
+        {
+          title: typeof body.title === "string" ? body.title : undefined,
+          description: typeof body.description === "string" ? body.description : undefined,
+          project: typeof body.project === "string" ? body.project : undefined,
+          priority: typeof body.priority === "string" ? (body.priority as Priority) : undefined,
+          tags: Array.isArray(body.tags) ? body.tags.map(String) : undefined,
+          due: typeof body.due === "string" ? body.due : body.due === null ? null : undefined,
+          note: typeof body.note === "string" ? body.note : undefined,
+        },
+        deps.config.author,
+      ),
     );
 
     return c.json({ task: write.result, warnings: write.warnings });
@@ -396,22 +391,18 @@ export function createWebApp(deps: WebDependencies): Hono {
     const body = await c.req.json<Record<string, unknown>>();
     const status = parseStatus(body.status);
 
-    const write = await runWrite(
-      deps,
-      async () => {
-        if (status === "in_progress") {
-          return deps.store.startTask(id, deps.config.author);
-        }
-        if (status === "done") {
-          return deps.store.doneTask(id, deps.config.author);
-        }
-        if (status === "cancelled") {
-          return deps.store.cancelTask(id, deps.config.author);
-        }
-        return deps.store.restoreTask(id, deps.config.author);
-      },
-      `karya(api): status ${status} ${id}`,
-    );
+    const write = await runWrite(deps, async () => {
+      if (status === "in_progress") {
+        return deps.store.startTask(id, deps.config.author);
+      }
+      if (status === "done") {
+        return deps.store.doneTask(id, deps.config.author);
+      }
+      if (status === "cancelled") {
+        return deps.store.cancelTask(id, deps.config.author);
+      }
+      return deps.store.restoreTask(id, deps.config.author);
+    });
 
     return c.json({ task: write.result, warnings: write.warnings });
   });

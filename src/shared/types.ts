@@ -1,6 +1,9 @@
-import type { SyncWarning } from "../core/git-sync.js";
+export interface Warning {
+  code: string;
+  message: string;
+}
 
 export type WriteResult<T> = {
   result: T;
-  warnings: SyncWarning[];
+  warnings: Warning[];
 };
