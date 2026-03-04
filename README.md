@@ -10,17 +10,19 @@ conflicts when multiple agents write concurrently.
 
 ```bash
 bun install
-bun run dev -- config init --data-dir ./data --no-sync
-bun run dev -- add "Ship MVP" -P P1 --data-dir ./data --no-sync
-bun run dev -- list --data-dir ./data --no-sync
+bun link                # Makes `karya` available globally
+karya config init --data-dir ./data --no-sync
+karya add "Ship MVP" -P P1 --data-dir ./data --no-sync
+karya list --data-dir ./data --no-sync
 ```
 
-Or use the launcher (auto-detects Bun, falls back to Node + tsx):
+If you prefer not to link globally, use the launcher directly:
 
 ```bash
-./bin/karya config init --data-dir ./data --no-sync
 ./bin/karya list --data-dir ./data --no-sync
 ```
+
+`./bin/karya` auto-detects Bun and falls back to Node + tsx.
 
 ## CLI commands
 

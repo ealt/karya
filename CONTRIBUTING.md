@@ -6,15 +6,17 @@
 git clone <repo-url>
 cd karya
 bun install
+bun link       # Makes `karya` available as a global command
 ```
 
 Requires [Bun](https://bun.sh/) v1.2.5+. Node.js 22+ works as a fallback
-(`npm install` + `npm run dev:node`).
+(`npm install` + `npm run dev:node`), but `bun link` requires Bun.
 
 ## Development workflow
 
 ```bash
-bun run dev -- <command>    # Run CLI during development
+karya <command>             # Run via global link
+bun run dev -- <command>    # Run without linking
 bun run test                # Run unit tests
 bun run test:e2e            # Run end-to-end tests
 bun run lint                # Type-check with tsc
