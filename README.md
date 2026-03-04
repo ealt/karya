@@ -1,51 +1,28 @@
 # Karya
 
-Git-backed task tracker for orchestrating AI agents across machines.
+> *Sanskrit: "what ought to be done"*
 
-## Quick Start (Bun First)
+Git-backed task tracker for orchestrating AI agents across machines. CLI-first,
+offline-resilient, syncs via git. One JSON file per task to minimize merge
+conflicts when multiple agents write concurrently.
 
-```bash
-bun install
-bun run src/cli/index.ts config init --data-dir ./data --no-sync
-bun run src/cli/index.ts add "Ship MVP" -P P1 --data-dir ./data --no-sync
-bun run src/cli/index.ts list --data-dir ./data --no-sync
-```
-
-Or use the launcher:
-
-```bash
-./bin/karya --data-dir ./data --no-sync list
-```
-
-`./bin/karya` prefers Bun automatically and falls back to Node + `tsx` when Bun is unavailable.
-
-## Migration From Node Toolchain
-
-Node command:
-
-```bash
-npm install
-npm run dev -- --help
-npm test
-npm run lint
-```
-
-Bun equivalent:
+## Quick start
 
 ```bash
 bun install
-bun run dev -- --help
-bun run test
-bun run lint
+bun run dev -- config init --data-dir ./data --no-sync
+bun run dev -- add "Ship MVP" -P P1 --data-dir ./data --no-sync
+bun run dev -- list --data-dir ./data --no-sync
 ```
 
-Node fallback remains available:
+Or use the launcher (auto-detects Bun, falls back to Node + tsx):
 
 ```bash
-npm run dev:node -- --help
+./bin/karya config init --data-dir ./data --no-sync
+./bin/karya list --data-dir ./data --no-sync
 ```
 
-## CLI Commands
+## CLI commands
 
 ```bash
 karya add "Title" -p project -P P1 -t tag1,tag2 --due tomorrow
@@ -55,7 +32,7 @@ karya edit <id> --priority P0 --note "context"
 karya start <id>
 karya done <id>
 karya cancel <id>
-karya delete <id> [--archive]
+karya delete <id>
 karya archive list
 karya archive restore <id>
 karya sync
@@ -64,24 +41,31 @@ karya config set <key> <value>
 karya serve --port 3000
 ```
 
-Global flags:
+Global flags: `--data-dir <path>`, `--format human|json`, `--no-sync`,
+`--author <name>`
 
-```bash
---data-dir <path>
---format human|json
---no-sync
---author <name>
-```
+All commands support `--format json` for programmatic/agent consumption.
+Partial ID prefix matching (min 4 chars).
 
-## Data Layout
+## Data layout
 
 ```text
 <data-repo>/
-  config.json
-  tasks/<id>.json
-  archive/<id>.json
-  projects/<slug>.json
+  config.json            # Repo-level defaults
+  tasks/<id>.json        # Active tasks (8-char nanoid IDs)
+  archive/<id>.json      # Completed/cancelled tasks
+  projects/<slug>.json   # Project metadata
 ```
+
+## Configuration
+
+Resolution order: CLI flags > env vars > app config > repo config > defaults.
+
+| Source | Location |
+|---|---|
+| App config | `~/.config/karya/karya.json` |
+| Repo config | `<data-dir>/config.json` |
+| Env vars | `KARYA_DATA_DIR`, `KARYA_AUTHOR`, `KARYA_NO_SYNC`, `KARYA_FORMAT` |
 
 ## Web UI
 
@@ -89,14 +73,22 @@ Global flags:
 karya serve --data-dir ./data --no-sync
 ```
 
-- Dashboard with filters
-- Task detail/edit panel
-- Inline status transitions
-- JSON API: `/api/tasks`, `/api/tasks/:id`
+Dashboard with filters, task detail/edit panel, inline status transitions.
+Uses Hono + HTMX + PicoCSS.
 
-## Testing
+JSON API available at `/api/tasks` and `/api/tasks/:id`.
+
+## Development
 
 ```bash
-bun run test
-bun run test:e2e
+bun install              # Install dependencies
+bun run dev -- --help    # Run CLI in dev mode
+bun run build            # Compile TypeScript
+bun run test             # Unit tests (Vitest)
+bun run test:e2e         # End-to-end tests
+bun run lint             # Type-check (tsc --noEmit)
 ```
+
+Node fallback: `npm run dev:node -- --help`
+
+For architecture details and coding patterns, see [AGENTS.md](./AGENTS.md).
