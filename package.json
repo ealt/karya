@@ -3,7 +3,16 @@
   "version": "0.1.0",
   "description": "SQL-backed task tracker for AI agent workflows",
   "type": "module",
+  "license": "MIT",
   "packageManager": "bun@1.2.5",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ealt/karya.git"
+  },
+  "homepage": "https://github.com/ealt/karya#readme",
   "bin": {
     "karya": "./bin/karya"
   },
@@ -21,7 +30,8 @@
     "dev:node": "node --import tsx src/cli/index.ts",
     "test": "vitest run",
     "test:e2e": "vitest run tests/e2e",
-    "lint": "tsc --noEmit -p tsconfig.json"
+    "lint": "tsc --noEmit -p tsconfig.json",
+    "prepublishOnly": "npm run build"
   },
   "dependencies": {
     "@hono/node-server": "^1.19.10",

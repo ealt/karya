@@ -6,24 +6,27 @@ SQL-backed task tracker for orchestrating AI agents across machines. CLI-first,
 portable via JSON export/import, with SQLite local storage and optional
 PostgreSQL backend.
 
-## Quick start
+## Install
 
 ```bash
-bun install
-bun link
-karya --db-path ./karya.db config init
-karya --db-path ./karya.db add "Ship MVP" -P P1
-karya --db-path ./karya.db list
+npm install -g karya
 ```
 
-If you prefer not to link globally, use the launcher directly:
+Then:
 
 ```bash
-./bin/karya --db-path ./karya.db list
+karya config init
+karya add "Ship MVP" -P P1
+karya list
 ```
 
-`./bin/karya` runs `dist/` when built, otherwise falls back to Bun or Node+tsx
-for source execution.
+### From source
+
+```bash
+git clone https://github.com/ealt/karya.git
+cd karya
+bun install && bun link
+```
 
 ## CLI commands
 
