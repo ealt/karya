@@ -9,6 +9,12 @@ PostgreSQL backend.
 ## Install
 
 ```bash
+curl -fsSL https://raw.githubusercontent.com/ealt/karya/main/install.sh | bash
+```
+
+Or with npm (once published):
+
+```bash
 npm install -g karya
 ```
 
