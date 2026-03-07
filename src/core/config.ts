@@ -303,6 +303,7 @@ export async function resolveConfig(options: ResolveConfigOptions = {}): Promise
       connectionString = await resolveOpReference(connectionString);
     }
 
+
     const ssl =
       options.ssl ??
       parseSslMode(env.KARYA_PG_SSL) ??
