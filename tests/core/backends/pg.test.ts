@@ -3,6 +3,8 @@ import { createPool, PgBackend } from "../../../src/core/backends/pg.js";
 import type { Task } from "../../../src/core/schema.js";
 
 const pgUrl = process.env.KARYA_TEST_PG_URL;
+const pgSslMode = process.env.KARYA_TEST_PG_SSL === "verify-full" ? "verify-full" : "off";
+const pgSslCaPath = process.env.KARYA_TEST_PG_SSL_CA;
 
 function task(overrides: Partial<Task> = {}): Task {
   return {
@@ -33,7 +35,10 @@ describePg("PgBackend", () => {
   let backend: PgBackend;
 
   beforeAll(async () => {
-    const pool = await createPool(pgUrl as string);
+    const pool = await createPool(pgUrl as string, {
+      mode: pgSslMode,
+      caPath: pgSslCaPath,
+    });
     backend = new PgBackend(pool);
     await backend.initialize();
   });

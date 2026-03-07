@@ -1,4 +1,4 @@
-import { access, mkdir, readdir, readFile, writeFile } from "node:fs/promises";
+import { access, chmod, mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { constants as fsConstants } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
@@ -13,6 +13,8 @@ export interface ResolveConfigOptions {
   dbPath?: string;
   backendType?: "sqlite" | "pg";
   connectionString?: string;
+  ssl?: "verify-full" | "off";
+  sslCaPath?: string;
   format?: OutputFormat;
   author?: string;
   skipLegacyCheck?: boolean;
@@ -22,7 +24,6 @@ export interface ResolvedConfig {
   backend: BackendConfig;
   format: OutputFormat;
   author: string;
-  webPort: number;
   defaultProject: string;
   defaultPriority: Priority;
   appConfigPath: string;
@@ -58,6 +59,19 @@ function parseBackendType(input: string | undefined): "sqlite" | "pg" | undefine
   }
 
   return undefined;
+}
+
+function parseSslMode(input: string | undefined): "verify-full" | "off" | undefined {
+  if (input === undefined) {
+    return undefined;
+  }
+
+  const value = input.trim().toLowerCase();
+  if (value === "verify-full" || value === "off") {
+    return value;
+  }
+
+  throw new KaryaError(`Invalid KARYA_PG_SSL value: ${input}`, "CONFIG");
 }
 
 function parseFormat(input: string | undefined): OutputFormat | undefined {
@@ -98,7 +112,6 @@ const DEFAULT_APP_CONFIG: AppConfig = {
   defaultProject: DEFAULT_PROJECT,
   defaultPriority: DEFAULT_PRIORITY,
   author: "cli",
-  web: { port: 3000 },
 };
 
 function migrateLegacyConfig(parsed: Record<string, unknown>): Record<string, unknown> {
@@ -119,14 +132,7 @@ export async function loadAppConfig(path = getAppConfigPath()): Promise<AppConfi
     const raw = await readFile(path, "utf8");
     const parsed = JSON.parse(raw) as Record<string, unknown>;
     const migrated = migrateLegacyConfig(parsed);
-    const merged = {
-      ...DEFAULT_APP_CONFIG,
-      ...migrated,
-      web: {
-        ...DEFAULT_APP_CONFIG.web,
-        ...(typeof migrated.web === "object" && migrated.web ? migrated.web : {}),
-      },
-    };
+    const merged = { ...DEFAULT_APP_CONFIG, ...migrated };
 
     return AppConfigSchema.parse(merged);
   } catch {
@@ -136,32 +142,20 @@ export async function loadAppConfig(path = getAppConfigPath()): Promise<AppConfi
 
 export async function saveAppConfig(patch: Record<string, unknown>, path = getAppConfigPath()): Promise<void> {
   const current = await loadAppConfig(path);
-  const updated = {
-    ...current,
-    ...patch,
-    web: {
-      ...current.web,
-      ...(typeof patch.web === "object" && patch.web ? (patch.web as Record<string, unknown>) : {}),
-    },
-  };
+  const updated = { ...current, ...patch };
 
   const validated = AppConfigSchema.parse(updated);
   await mkdir(dirname(path), { recursive: true });
   await writeFile(path, `${JSON.stringify(validated, null, 2)}\n`, "utf8");
+  try {
+    await chmod(path, 0o600);
+  } catch {
+    // Ignore unsupported chmod platforms and permission errors.
+  }
 }
 
 export async function setAppConfigValue(key: string, value: string): Promise<void> {
   const current = await loadAppConfig();
-
-  if (key === "web.port") {
-    const port = Number(value);
-    if (!Number.isInteger(port) || port <= 0 || port > 65535) {
-      throw new KaryaError(`Invalid web.port: ${value}`, "CONFIG");
-    }
-
-    await saveAppConfig({ web: { port } });
-    return;
-  }
 
   if (key === "author" || key === "defaultProject" || key === "defaultPriority") {
     await saveAppConfig({ [key]: value });
@@ -180,7 +174,14 @@ export async function setAppConfigValue(key: string, value: string): Promise<voi
 
     if (value === "pg") {
       if (current.backend?.type === "pg") {
-        await saveAppConfig({ backend: { type: "pg", connectionString: current.backend.connectionString } });
+        await saveAppConfig({
+          backend: {
+            type: "pg",
+            connectionString: current.backend.connectionString,
+            ssl: current.backend.ssl,
+            sslCaPath: current.backend.sslCaPath,
+          },
+        });
         return;
       }
 
@@ -196,7 +197,51 @@ export async function setAppConfigValue(key: string, value: string): Promise<voi
   }
 
   if (key === "backend.connectionString") {
-    await saveAppConfig({ backend: { type: "pg", connectionString: value } });
+    await saveAppConfig({
+      backend: {
+        type: "pg",
+        connectionString: value,
+        ssl: current.backend?.type === "pg" ? current.backend.ssl : "verify-full",
+        sslCaPath: current.backend?.type === "pg" ? current.backend.sslCaPath : undefined,
+      },
+    });
+    return;
+  }
+
+  if (key === "backend.ssl") {
+    if (current.backend?.type !== "pg") {
+      throw new KaryaError("backend.ssl only applies to pg backend; set backend.connectionString first", "CONFIG");
+    }
+
+    if (value !== "verify-full" && value !== "off") {
+      throw new KaryaError(`Invalid backend.ssl: ${value}`, "CONFIG");
+    }
+
+    await saveAppConfig({
+      backend: {
+        type: "pg",
+        connectionString: current.backend.connectionString,
+        ssl: value,
+        sslCaPath: current.backend.sslCaPath,
+      },
+    });
+    return;
+  }
+
+  if (key === "backend.sslCaPath") {
+    if (current.backend?.type !== "pg") {
+      throw new KaryaError("backend.sslCaPath only applies to pg backend; set backend.connectionString first", "CONFIG");
+    }
+
+    const sslCaPath = value.trim().length > 0 ? expandHome(value) : undefined;
+    await saveAppConfig({
+      backend: {
+        type: "pg",
+        connectionString: current.backend.connectionString,
+        ssl: current.backend.ssl,
+        sslCaPath,
+      },
+    });
     return;
   }
 
@@ -252,9 +297,22 @@ export async function resolveConfig(options: ResolveConfigOptions = {}): Promise
       throw new KaryaError("PostgreSQL backend requires connection string", "CONFIG");
     }
 
+    const ssl =
+      options.ssl ??
+      parseSslMode(env.KARYA_PG_SSL) ??
+      (appConfig.backend?.type === "pg" ? appConfig.backend.ssl : undefined) ??
+      "verify-full";
+
+    const sslCaPathRaw =
+      options.sslCaPath ??
+      env.KARYA_PG_SSL_CA ??
+      (appConfig.backend?.type === "pg" ? appConfig.backend.sslCaPath : undefined);
+
     backend = {
       type: "pg",
       connectionString,
+      ssl,
+      sslCaPath: sslCaPathRaw ? expandHome(sslCaPathRaw) : undefined,
     };
   }
 
@@ -262,7 +320,6 @@ export async function resolveConfig(options: ResolveConfigOptions = {}): Promise
     backend,
     format: options.format ?? parseFormat(env.KARYA_FORMAT) ?? (DEFAULT_FORMAT as OutputFormat),
     author: options.author ?? env.KARYA_AUTHOR ?? appConfig.author,
-    webPort: appConfig.web.port,
     defaultProject: appConfig.defaultProject,
     defaultPriority: appConfig.defaultPriority,
     appConfigPath,

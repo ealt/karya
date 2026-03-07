@@ -34,11 +34,9 @@
     "prepublishOnly": "npm run build"
   },
   "dependencies": {
-    "@hono/node-server": "^1.19.10",
     "better-sqlite3": "^11.10.0",
     "commander": "^12.1.0",
     "date-fns": "^4.1.0",
-    "hono": "^4.12.4",
     "nanoid": "^5.1.5",
     "zod": "^4.1.5"
   },

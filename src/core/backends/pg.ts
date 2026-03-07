@@ -1,9 +1,16 @@
+import { readFile } from "node:fs/promises";
 import { TaskSchema, type Task } from "../schema.js";
 import type { Bucket, DbBackend, WriteResult } from "../backend.js";
+import { KaryaError } from "../errors.js";
 import { Pool, type PoolConfig } from "pg";
 
 interface TaskRow {
   data: unknown;
+}
+
+export interface PgSslOptions {
+  mode: "verify-full" | "off";
+  caPath?: string;
 }
 
 function parseRowData(data: unknown): Task {
@@ -14,10 +21,36 @@ function parseRowData(data: unknown): Task {
   return TaskSchema.parse(data);
 }
 
-export async function createPool(connectionString: string): Promise<Pool> {
-  const config: PoolConfig = { connectionString };
+function redactConnectionStrings(input: string): string {
+  return input.replace(/postgresql?:\/\/[^\s]+/gi, "postgresql://***");
+}
+
+export async function createPool(connectionString: string, ssl?: PgSslOptions): Promise<Pool> {
+  const poolSsl =
+    ssl?.mode === "off"
+      ? false
+      : {
+          rejectUnauthorized: true,
+          ...(ssl?.caPath ? { ca: await readFile(ssl.caPath, "utf8") } : {}),
+        };
+
+  const config: PoolConfig = {
+    connectionString,
+    ssl: poolSsl,
+    max: 5,
+    idleTimeoutMillis: 10_000,
+    connectionTimeoutMillis: 5_000,
+  };
   const pool = new Pool(config);
-  await pool.query("SELECT 1");
+
+  try {
+    await pool.query("SELECT 1");
+  } catch (error) {
+    await pool.end().catch(() => undefined);
+    const message = error instanceof Error ? error.message : String(error);
+    throw new KaryaError(`Failed to connect to PostgreSQL: ${redactConnectionStrings(message)}`, "CONFIG");
+  }
+
   return pool;
 }
 

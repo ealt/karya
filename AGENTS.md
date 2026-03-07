@@ -19,7 +19,7 @@ bun run build          # tsc -> dist/
 
 # Test
 bun run test           # vitest unit tests
-bun run test:e2e       # e2e tests (CLI + web)
+bun run test:e2e       # e2e tests
 
 # Lint (type-check only)
 bun run lint           # tsc --noEmit
@@ -30,14 +30,13 @@ bun run lint           # tsc --noEmit
 
 ## Architecture
 
-**Stack:** TypeScript (ES2022, NodeNext modules), Bun, Commander.js, Hono,
-Zod, Vitest
+**Stack:** TypeScript (ES2022, NodeNext modules), Bun, Commander.js, Zod, Vitest
 
 ### Source layout
 
 ```
 src/
-  core/           # Domain logic (no CLI/web dependencies)
+  core/           # Domain logic (no CLI dependencies)
     schema.ts     # Zod schemas: Task, RepoConfig, AppConfig, ListFilters
     task-store.ts # File-based CRUD, archive semantics, reconcile-on-write
     git-sync.ts   # Git operations: pull/rebase, commit, push with retries
@@ -54,14 +53,12 @@ src/
     commands/     # One file per command (add, list, show, edit, etc.)
     formatters/   # Human and JSON output formatting
     shared/       # CliRuntime: resolves config + creates store/sync per command
-  web/
-    server.ts     # Hono app: HTML+HTMX routes + JSON API
   shared/
     types.ts      # Shared TS types (WriteResult)
-    constants.ts  # Default values (schema version, project, priority, port)
+    constants.ts  # Default values (schema version, project, priority)
 tests/
   core/           # Unit tests mirroring src/core/
-  e2e/            # CLI and web server integration tests
+  e2e/            # CLI integration tests
 ```
 
 ### Data model
@@ -93,12 +90,6 @@ CLI flags > env vars (`KARYA_DATA_DIR`, `KARYA_AUTHOR`, `KARYA_NO_SYNC`,
   append-merged and deduplicated
 - **Offline:** Commits locally, queues push; `--no-sync` disables auto-sync
 
-### Web UI
-
-Hono server with string-template HTML + HTMX for partial updates. PicoCSS
-for styling. Exposes both HTML routes (`/`, `/tasks`, `/tasks/:id`) and a
-JSON API (`/api/tasks`, `/api/tasks/:id`).
-
 ## Patterns
 
 - **One file per task:** Minimizes git merge conflicts when multiple agents
@@ -121,4 +112,3 @@ JSON API (`/api/tasks`, `/api/tasks/:id`).
 - `parseDueInput` returns `null` for invalid dates (caller must check)
 - `KaryaError` codes: `VALIDATION`, `NOT_FOUND`, `INVALID_ID`, `AMBIGUOUS_ID`,
   `INVALID_STATE`, `SYNC`
-- Web server uses `@hono/node-server` (not Bun.serve) for Node compatibility

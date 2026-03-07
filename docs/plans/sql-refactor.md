@@ -317,12 +317,9 @@ Key changes:
 
 ### Step 9: Update web server
 
-**Modify:** `src/web/server.ts`
-
-- `WebDependencies`: remove `sync` field
-- Remove `runWrite` wrapper (inline the operation calls)
-- Remove `SyncWarning` usage from HTML rendering (keep `warningsBlock` for
-  conflict warnings only, or remove entirely)
+**Historical note:** This step has since been superseded. The web server was
+removed in `docs/plans/ui-redesign.md` and `src/web/server.ts` no longer
+exists.
 
 ### Step 10: Update CLI commands
 
@@ -394,8 +391,8 @@ subdirectories, validates with `migrateTaskRecord`, and inserts via
 - Remove `--no-sync` flag
 - Same workflow tested
 
-**Modify:** `tests/e2e/web.e2e.test.ts`
-- Same pattern: in-memory or temp SQLite
+**Delete:** `tests/e2e/web.e2e.test.ts`
+- Removed with web server deprecation
 
 **New:** `tests/core/backends/sqlite.test.ts`
 - Direct backend CRUD tests using `:memory:` database
@@ -426,7 +423,7 @@ subdirectories, validates with `migrateTaskRecord`, and inserts via
 | `src/cli/commands/index.ts` | MODIFY — remove sync, add export/import |
 | `src/cli/commands/config.ts` | MODIFY — backend-aware init |
 | `src/cli/index.ts` | MODIFY — remove --no-sync |
-| `src/web/server.ts` | MODIFY — remove sync |
+| `src/web/server.ts` | DELETE — removed in later plan |
 | `src/shared/types.ts` | MODIFY — remove SyncWarning |
 | `src/shared/constants.ts` | MODIFY — platform-aware default path |
 | `src/core/git-sync.ts` | DELETE |
@@ -445,7 +442,7 @@ subdirectories, validates with `migrateTaskRecord`, and inserts via
 
 1. `bun run lint` — type-check passes
 2. `bun run test` — all unit tests pass (using in-memory SQLite)
-3. `bun run test:e2e` — CLI + web e2e tests pass
+3. `bun run test:e2e` — CLI e2e tests pass
 4. Legacy detection: run against a directory with old `tasks/*.json` files →
    prints warning with import instructions, exits 1
 4b. Same with `--skip-legacy-check` → proceeds without warning
