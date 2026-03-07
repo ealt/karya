@@ -16,6 +16,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ### Changed
 
 - npm publish step is gated on `NPM_TOKEN` secret being configured
+- PostgreSQL TLS configuration now supports `verify-full` (default) and `off`
+  modes with optional CA path support
+
+### Removed
+
+- Web UI server and `karya serve` command
+- Web dependencies (`hono`, `@hono/node-server`)
 
 ## [0.1.0] - 2025-05-15
 
