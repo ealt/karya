@@ -123,6 +123,7 @@ function migrateLegacyConfig(parsed: Record<string, unknown>): Record<string, un
 
   delete next.dataDir;
   delete next.autoSync;
+  delete next.web;
 
   return next;
 }

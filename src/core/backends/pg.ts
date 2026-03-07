@@ -22,7 +22,11 @@ function parseRowData(data: unknown): Task {
 }
 
 function redactConnectionStrings(input: string): string {
-  return input.replace(/postgresql?:\/\/[^\s]+/gi, "postgresql://***");
+  return input
+    .replace(/postgresql?:\/\/[^\s]+/gi, "postgresql://***")
+    .replace(/"(host|user|username|password|database|dbname|db)"\s*:\s*"[^"]*"/gi, '"$1":"***"')
+    .replace(/\b(host|user|username|password|database|dbname|db)\s*=\s*('[^']*'|"[^"]*"|[^\s,;]+)/gi, "$1=***")
+    .replace(/\b(host|user|username|password|database|dbname|db)\s*:\s*('[^']*'|"[^"]*"|[^\s,;]+)/gi, "$1:***");
 }
 
 export async function createPool(connectionString: string, ssl?: PgSslOptions): Promise<Pool> {

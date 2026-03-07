@@ -1,8 +1,8 @@
-import { mkdtemp, mkdir, stat } from "node:fs/promises";
+import { mkdtemp, mkdir, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { getAppConfigPath, resolveConfig, setAppConfigValue } from "../../src/core/config.js";
+import { getAppConfigPath, loadAppConfig, resolveConfig, setAppConfigValue } from "../../src/core/config.js";
 
 const ENV_KEYS = [
   "HOME",
@@ -103,5 +103,42 @@ describe("setAppConfigValue pg ssl fields", () => {
       const mode = (await stat(getAppConfigPath())).mode & 0o777;
       expect(mode).toBe(0o600);
     }
+  });
+});
+
+describe("loadAppConfig legacy keys", () => {
+  it("loads legacy config containing web without falling back to defaults", async () => {
+    const configPath = getAppConfigPath();
+    await mkdir(join(process.env.HOME as string, ".config", "karya"), { recursive: true });
+    await writeFile(
+      configPath,
+      `${JSON.stringify(
+        {
+          backend: {
+            type: "pg",
+            connectionString: "postgresql://localhost/custom",
+            ssl: "off",
+          },
+          author: "legacy-author",
+          defaultProject: "legacy-project",
+          defaultPriority: "P1",
+          web: { port: 9999 },
+        },
+        null,
+        2,
+      )}\n`,
+      "utf8",
+    );
+
+    const config = await loadAppConfig(configPath);
+    expect(config.author).toBe("legacy-author");
+    expect(config.defaultProject).toBe("legacy-project");
+    expect(config.defaultPriority).toBe("P1");
+    expect(config.backend?.type).toBe("pg");
+    if (config.backend?.type !== "pg") {
+      throw new Error("expected pg backend");
+    }
+    expect(config.backend.connectionString).toBe("postgresql://localhost/custom");
+    expect(config.backend.ssl).toBe("off");
   });
 });

@@ -101,4 +101,29 @@ describe("createPool", () => {
     expect((error as KaryaError).message).not.toContain("secret@example.com");
     expect(mockState.endMock).toHaveBeenCalledTimes(1);
   });
+
+  it("redacts split pg fields in connection errors", async () => {
+    mockState.queryMock.mockRejectedValueOnce(
+      new Error(
+        'connect failed host=db.example.com user=alice password=s3cr3t dbname=karya payload={"host":"db.example.com","user":"alice","password":"s3cr3t","database":"karya"}',
+      ),
+    );
+
+    const error = await createPool("postgresql://localhost/karya", { mode: "off" }).catch((err) => err);
+
+    expect(error).toBeInstanceOf(KaryaError);
+    const message = (error as KaryaError).message;
+    expect(message).toContain("host=***");
+    expect(message).toContain("user=***");
+    expect(message).toContain("password=***");
+    expect(message).toContain("dbname=***");
+    expect(message).toContain('"host":"***"');
+    expect(message).toContain('"user":"***"');
+    expect(message).toContain('"password":"***"');
+    expect(message).toContain('"database":"***"');
+    expect(message).not.toContain("db.example.com");
+    expect(message).not.toContain("alice");
+    expect(message).not.toContain("s3cr3t");
+    expect(mockState.endMock).toHaveBeenCalledTimes(1);
+  });
 });
