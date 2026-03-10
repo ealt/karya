@@ -14,11 +14,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - 1Password secret reference support for PostgreSQL connection strings — store
   `op://vault/item/field` in config or env vars and karya resolves it at runtime
   via `op read`, keeping plaintext credentials off disk
-
-## [0.1.1] - 2026-03-12
-
-### Added
-
 - PostgreSQL SSL/TLS support (`verify-full` default, `off` for local dev)
 - Config file permission hardening (0600 on POSIX)
 - Connection string redaction in error messages
