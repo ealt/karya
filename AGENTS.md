@@ -52,7 +52,6 @@ src/
     dates.ts           # ISO timestamps + relative due parsing
     errors.ts          # KaryaError with typed error codes
     id.ts              # 8-char nanoid generation
-    fs.ts              # Atomic JSON writes (export/import)
   cli/
     index.ts           # Commander entrypoint + global options
     commands/          # add/list/show/edit/transition/archive/etc.

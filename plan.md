@@ -1,3 +1,7 @@
+**Superseded.** Original design document. The codebase has moved to SQL backends (SQLite/PostgreSQL) and the web server has been removed. See AGENTS.md for current architecture.
+
+---
+
 # Karya — Implementation Plan
 
 > *Sanskrit: "what ought to be done"* — Git-backed task tracker for orchestrating AI agents across machines.

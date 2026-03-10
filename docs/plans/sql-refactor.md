@@ -317,9 +317,10 @@ Key changes:
 
 ### Step 9: Update web server
 
-**Historical note:** This step has since been superseded. The web server was
-removed in `docs/plans/ui-redesign.md` and `src/web/server.ts` no longer
-exists.
+**Historical note:** This step has since been superseded. The web server has
+been permanently removed — all code (`src/web/`, `src/cli/commands/serve.ts`),
+dependencies (`hono`, `@hono/node-server`), and the `karya serve` command are
+gone. See AGENTS.md for current architecture.
 
 ### Step 10: Update CLI commands
 

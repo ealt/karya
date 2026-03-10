@@ -1,3 +1,7 @@
+**Superseded.** This plan has been fully implemented. The web server has been permanently removed and SSL/TLS hardening is in place. See AGENTS.md for current architecture.
+
+---
+
 # Plan: Security Hardening for AWS RDS PostgreSQL
 
 ## Context
