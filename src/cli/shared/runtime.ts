@@ -164,20 +164,6 @@ function toConflictWarning(result: unknown): Warning[] {
   ];
 }
 
-function commandName(commandLike: unknown): string | null {
-  if (
-    commandLike &&
-    typeof commandLike === "object" &&
-    "name" in commandLike &&
-    typeof (commandLike as { name?: unknown }).name === "function"
-  ) {
-    const value = (commandLike as { name: () => unknown }).name();
-    return typeof value === "string" ? value : null;
-  }
-
-  return null;
-}
-
 export function createCliRuntime(program: Command): CliRuntime {
   return {
     parseCsv,
@@ -215,7 +201,7 @@ export function createCliRuntime(program: Command): CliRuntime {
         );
         process.exitCode = 1;
       } finally {
-        if (backend && commandName(commandLike) !== "serve") {
+        if (backend) {
           await backend.close();
         }
       }

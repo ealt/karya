@@ -9,9 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- PostgreSQL SSL/TLS support (`verify-full` default, `off` for local dev)
+- Config file permission hardening (0600 on POSIX)
+- Connection string redaction in error messages
 - Install script (`install.sh`) for `curl | bash` installation via GitHub
   Releases
 - GitHub Release now includes npm tarball as a release asset
+
+### Removed
+
+- Web UI (`karya serve`) — Hono, HTMX, PicoCSS dependencies removed
 
 ### Changed
 

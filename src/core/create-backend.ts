@@ -14,6 +14,9 @@ export async function createBackend(config: BackendConfig): Promise<DbBackend> {
   }
 
   const { createPool, PgBackend } = await import("./backends/pg.js");
-  const pool = await createPool(config.connectionString);
+  const pool = await createPool(config.connectionString, {
+    mode: config.ssl,
+    caPath: config.sslCaPath,
+  });
   return new PgBackend(pool);
 }

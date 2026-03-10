@@ -47,7 +47,7 @@ patterns.
 ## Testing
 
 - Unit tests: `tests/core/` — test domain logic in isolation
-- E2E tests: `tests/e2e/` — test CLI commands and web server end-to-end
+- E2E tests: `tests/e2e/` — test CLI commands end-to-end
 - Test runner: Vitest (not Bun's built-in runner)
 
 To run a specific test file:

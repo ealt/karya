@@ -51,7 +51,6 @@ karya export --output ./backup
 karya import --input ./backup
 karya config init
 karya config set <key> <value>
-karya serve --port 3000
 ```
 
 Global flags: `--db-path <path>`, `--format human|json`, `--author <name>`,
@@ -69,7 +68,24 @@ Resolution order: CLI flags > env vars > app config > defaults.
 | Source | Location |
 |---|---|
 | App config | `~/.config/karya/karya.json` |
-| Env vars | `KARYA_BACKEND`, `KARYA_DB_PATH`, `KARYA_PG_CONNECTION_STRING`, `KARYA_AUTHOR`, `KARYA_FORMAT` |
+| Env vars | `KARYA_BACKEND`, `KARYA_DB_PATH`, `KARYA_DATA_DIR`, `KARYA_PG_CONNECTION_STRING`, `KARYA_PG_SSL`, `KARYA_PG_SSL_CA`, `KARYA_AUTHOR`, `KARYA_FORMAT`, `KARYA_SKIP_LEGACY_CHECK` |
+
+`karya config set` supports:
+- `author`
+- `defaultProject`
+- `defaultPriority`
+- `backend.type` (`sqlite` or `pg`)
+- `backend.dbPath`
+- `backend.connectionString`
+- `backend.ssl` (`verify-full` or `off`, pg backend only)
+- `backend.sslCaPath` (pg backend only)
+
+### PostgreSQL TLS
+
+- Default mode is `verify-full` (certificate verification enabled)
+- Local development can use `off`
+- Invalid `KARYA_PG_SSL` values fail fast
+- `backend.sslCaPath` and `KARYA_PG_SSL_CA` support `~/...` expansion
 
 ## Legacy JSON migration
 
@@ -80,15 +96,6 @@ interop path:
 karya --db-path ./karya.db --skip-legacy-check import --input <old-data-dir>
 karya --db-path ./karya.db export --output ./backup
 ```
-
-## Web UI
-
-```bash
-karya --db-path ./karya.db serve
-```
-
-Dashboard with filters, task detail/edit panel, and inline status transitions.
-Uses Hono + HTMX + PicoCSS. JSON API is available at `/api/tasks`.
 
 ## Development
 

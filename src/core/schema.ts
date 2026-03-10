@@ -4,7 +4,6 @@ import {
   DEFAULT_PRIORITY,
   DEFAULT_PROJECT,
   DEFAULT_SCHEMA_VERSION,
-  DEFAULT_WEB_PORT,
 } from "../shared/constants.js";
 
 export const PrioritySchema = z.enum(["P0", "P1", "P2", "P3"]);
@@ -52,6 +51,8 @@ export const BackendConfigSchema = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("pg"),
     connectionString: z.string().min(1),
+    ssl: z.enum(["verify-full", "off"]).default("verify-full"),
+    sslCaPath: z.string().optional(),
   }),
 ]);
 
@@ -60,9 +61,6 @@ export const AppConfigSchema = z.object({
   defaultProject: z.string().min(1).default(DEFAULT_PROJECT),
   defaultPriority: PrioritySchema.default(DEFAULT_PRIORITY),
   author: z.string().min(1).default("cli"),
-  web: z.object({
-    port: z.number().int().min(1).max(65535).default(DEFAULT_WEB_PORT),
-  }),
 });
 
 export const ListFiltersSchema = z.object({

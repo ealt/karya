@@ -16,7 +16,7 @@ interface CliResult {
 async function runCli(args: string[], homeDir: string): Promise<CliResult> {
   try {
     const { stdout, stderr } = await execFileAsync("node", ["--import", "tsx", "src/cli/index.ts", ...args], {
-      cwd: "/karya-sandbox",
+      cwd: process.cwd(),
       env: {
         ...process.env,
         HOME: homeDir,
@@ -115,5 +115,15 @@ describe("CLI e2e", () => {
 
     const bypassed = await runCli(["--db-path", dbPath, "--skip-legacy-check", "list"], homeDir);
     expect(bypassed.code).toBe(0);
+  });
+
+  it("does not expose a serve command", async () => {
+    const root = await mkdtemp(join(tmpdir(), "karya-e2e-serve-"));
+    const homeDir = join(root, "home");
+    await mkdir(homeDir, { recursive: true });
+
+    const result = await runCli(["serve"], homeDir);
+    expect(result.code).toBe(1);
+    expect(`${result.stdout}\n${result.stderr}`.toLowerCase()).toContain("unknown command");
   });
 });
