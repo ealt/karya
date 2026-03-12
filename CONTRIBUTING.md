@@ -51,7 +51,8 @@ After that commit is merged to `main`, GitHub Actions detects whether the
 current `package.json` version already has a matching tag and GitHub Release. If
 not, it runs the release pipeline automatically: lint, tests, `npm pack`,
 smoke-test the installed tarball, create the tag if needed, publish the GitHub
-Release, optionally publish to npm when `NPM_TOKEN` is configured, and notify
+Release, optionally publish to npm when `NPM_TOKEN` and the `NPM_PUBLISH_ENABLED`
+repository variable are configured, and notify
 `ealt/homebrew-tap` after the release is published.
 
 ## Code conventions

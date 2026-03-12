@@ -180,5 +180,5 @@ jobs:
             ${{ steps.checksum.outputs.checksum_file }}
           generate_release_notes: false
       - name: Publish to npm
-        if: ${{ steps.detect.outputs.should_release == 'true' && env.NODE_AUTH_TOKEN != '' }}
+        if: ${{ steps.detect.outputs.should_release == 'true' && env.NODE_AUTH_TOKEN != '' && vars.NPM_PUBLISH_ENABLED == 'true' }}
         run: npm publish --provenance --access public
