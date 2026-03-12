@@ -8,7 +8,7 @@ cd "${PROJECT_ROOT}"
 DEFAULT_BRANCH="${BRANCH:-main}"
 CHANGELOG_FILE="CHANGELOG.md"
 REPO_URL="https://github.com/ealt/karya"
-FILES_TO_RESTORE=(package.json package-lock.json bun.lock CHANGELOG.md)
+FILES_TO_RESTORE=(package.json bun.lock CHANGELOG.md)
 CLEANUP_REQUIRED=0
 PACKED_TARBALL=""
 SMOKE_PREFIX=""
@@ -247,7 +247,7 @@ section "Pack and smoke test"
 smoke_test_tarball "${TARGET_VERSION}"
 
 section "Commit"
-git add package.json package-lock.json bun.lock CHANGELOG.md
+git add package.json bun.lock CHANGELOG.md
 git commit -m "chore: prepare release ${TAG_NAME}"
 CLEANUP_REQUIRED=0
 
