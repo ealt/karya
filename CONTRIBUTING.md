@@ -37,7 +37,7 @@ patterns.
 
 ## Releasing
 
-Create a release from a clean `main` checkout:
+Prepare a release bump on a feature branch:
 
 ```bash
 npm run release -- patch
@@ -45,13 +45,14 @@ npm run release -- patch
 
 The release script runs local validation, bumps the version, moves
 `CHANGELOG.md` entries out of `[Unreleased]`, smoke-tests the packaged tarball,
-then creates the release commit and annotated tag. Push the branch and tag when
-prompted, or set `PUSH=1` to push automatically.
+and creates a `chore: prepare release vX.Y.Z` commit.
 
-After the tag is pushed, GitHub Actions publishes the tarball and checksum to a
-GitHub Release. If `NPM_TOKEN` is configured, the same workflow can also publish
-to npm. A separate workflow notifies `ealt/homebrew-tap` when the release is
-published.
+After that commit is merged to `main`, GitHub Actions detects whether the
+current `package.json` version already has a matching tag and GitHub Release. If
+not, it runs the release pipeline automatically: lint, tests, `npm pack`,
+smoke-test the installed tarball, create the tag if needed, publish the GitHub
+Release, optionally publish to npm when `NPM_TOKEN` is configured, and notify
+`ealt/homebrew-tap` after the release is published.
 
 ## Code conventions
 

@@ -16,10 +16,6 @@ SMOKE_PREFIX=""
 usage() {
   cat <<'EOF'
 Usage: scripts/release.sh <patch|minor|major|X.Y.Z>
-
-Environment:
-  BRANCH   Branch to release from (default: main)
-  PUSH=1   Push the release commit and tag automatically
 EOF
 }
 
@@ -80,7 +76,7 @@ current_version() {
 }
 
 resolve_target_version() {
-  node <<'NODE' "$1" "$(current_version)"
+  node - "$1" "$(current_version)" <<'NODE'
 const input = process.argv[2];
 const current = process.argv[3];
 
@@ -116,7 +112,7 @@ NODE
 }
 
 verify_unreleased_section() {
-  node <<'NODE' "${CHANGELOG_FILE}"
+  node - "${CHANGELOG_FILE}" <<'NODE'
 const fs = require("node:fs");
 
 const changelogPath = process.argv[2];
@@ -141,7 +137,7 @@ NODE
 }
 
 update_changelog() {
-  node <<'NODE' "${CHANGELOG_FILE}" "$1" "$2" "${REPO_URL}"
+  node - "${CHANGELOG_FILE}" "$1" "$2" "${REPO_URL}" <<'NODE'
 const fs = require("node:fs");
 
 const [changelogPath, version, releaseDate, repoUrl] = process.argv.slice(2);
@@ -204,11 +200,6 @@ smoke_test_tarball() {
   SMOKE_PREFIX=""
 }
 
-push_release() {
-  local tag_name=$1
-  git push origin "${DEFAULT_BRANCH}" "${tag_name}"
-}
-
 if [ "${1:-}" = "" ]; then
   usage
   exit 1
@@ -229,21 +220,6 @@ TAG_NAME="v${TARGET_VERSION}"
 
 section "Preflight"
 require_clean_tree
-
-if [ "$(current_branch)" != "${DEFAULT_BRANCH}" ]; then
-  fail "must release from ${DEFAULT_BRANCH}"
-fi
-
-git fetch --quiet --tags origin "${DEFAULT_BRANCH}"
-
-if [ "$(git rev-parse HEAD)" != "$(git rev-parse "origin/${DEFAULT_BRANCH}")" ]; then
-  fail "local branch is not up to date with origin/${DEFAULT_BRANCH}"
-fi
-
-if git rev-parse -q --verify "refs/tags/${TAG_NAME}" >/dev/null 2>&1; then
-  fail "tag ${TAG_NAME} already exists"
-fi
-
 verify_unreleased_section
 
 section "Local validation"
@@ -271,24 +247,13 @@ smoke_test_tarball "${TARGET_VERSION}"
 
 section "Commit"
 git add package.json package-lock.json bun.lock CHANGELOG.md
-git commit -m "chore: release ${TAG_NAME}"
+git commit -m "chore: prepare release ${TAG_NAME}"
 CLEANUP_REQUIRED=0
 
-section "Tag"
-git tag -a "${TAG_NAME}" -m "${TAG_NAME}"
-
-section "Push"
-if [ "${PUSH:-0}" = "1" ]; then
-  push_release "${TAG_NAME}"
-  echo "Pushed ${DEFAULT_BRANCH} and ${TAG_NAME}."
-  exit 0
-fi
-
-read -r -p "Push ${DEFAULT_BRANCH} and ${TAG_NAME} to origin? [y/N] " should_push
-if [[ "${should_push}" =~ ^[Yy]$ ]]; then
-  push_release "${TAG_NAME}"
-  echo "Pushed ${DEFAULT_BRANCH} and ${TAG_NAME}."
-else
-  echo "Release commit and tag created locally. Push when ready:"
-  echo "  git push origin ${DEFAULT_BRANCH} ${TAG_NAME}"
-fi
+section "Next steps"
+echo "Release preparation commit created on $(current_branch):"
+echo "  chore: prepare release ${TAG_NAME}"
+echo
+echo "Open a pull request or merge this commit into ${DEFAULT_BRANCH}."
+echo "The release workflow on ${DEFAULT_BRANCH} will detect ${TAG_NAME}, create the tag if needed,"
+echo "publish the GitHub Release, and notify the Homebrew tap automatically."

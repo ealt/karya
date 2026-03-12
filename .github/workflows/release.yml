@@ -1,8 +1,13 @@
 name: Release
 on:
   push:
-    tags:
-      - "v*"
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: release-main
+  cancel-in-progress: false
 
 jobs:
   release:
@@ -10,33 +15,91 @@ jobs:
     permissions:
       contents: write
       id-token: write
+    env:
+      NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: 20
           registry-url: https://registry.npmjs.org
-      - run: npm ci
-      - name: Verify tag matches package version
+      - name: Detect unreleased version on main
+        id: detect
         env:
-          TAG_NAME: ${{ github.ref_name }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          PACKAGE_VERSION=$(node -p "require('./package.json').version")
-          EXPECTED_TAG="v${PACKAGE_VERSION}"
+          git fetch --force --tags origin
 
-          if [ "${TAG_NAME}" != "${EXPECTED_TAG}" ]; then
-            echo "Expected tag ${EXPECTED_TAG}, got ${TAG_NAME}." >&2
-            exit 1
+          VERSION=$(node -p "require('./package.json').version")
+          TAG_NAME="v${VERSION}"
+          RELEASE_STATUS=$(curl -sS -o /dev/null -w "%{http_code}" \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/tags/${TAG_NAME}")
+
+          if git rev-parse -q --verify "refs/tags/${TAG_NAME}" >/dev/null 2>&1; then
+            TAG_EXISTS=true
+          else
+            TAG_EXISTS=false
           fi
+
+          case "${RELEASE_STATUS}" in
+            200)
+              RELEASE_EXISTS=true
+              ;;
+            404)
+              RELEASE_EXISTS=false
+              ;;
+            *)
+              echo "Unexpected GitHub API status while checking ${TAG_NAME}: ${RELEASE_STATUS}" >&2
+              exit 1
+              ;;
+          esac
+
+          echo "version=${VERSION}" >> "${GITHUB_OUTPUT}"
+          echo "tag_name=${TAG_NAME}" >> "${GITHUB_OUTPUT}"
+
+          if [ "${TAG_EXISTS}" = true ] && [ "${RELEASE_EXISTS}" = true ]; then
+            echo "should_release=false" >> "${GITHUB_OUTPUT}"
+            echo "create_tag=false" >> "${GITHUB_OUTPUT}"
+            echo "Version ${VERSION} already has a tag and GitHub Release."
+            exit 0
+          fi
+
+          if [ "${TAG_EXISTS}" = false ] && [ "${RELEASE_EXISTS}" = false ]; then
+            echo "should_release=true" >> "${GITHUB_OUTPUT}"
+            echo "create_tag=true" >> "${GITHUB_OUTPUT}"
+            echo "Preparing a fresh release for ${TAG_NAME}."
+            exit 0
+          fi
+
+          if [ "${TAG_EXISTS}" = true ] && [ "${RELEASE_EXISTS}" = false ]; then
+            echo "should_release=true" >> "${GITHUB_OUTPUT}"
+            echo "create_tag=false" >> "${GITHUB_OUTPUT}"
+            echo "Tag ${TAG_NAME} exists without a GitHub Release. Re-publishing release assets."
+            exit 0
+          fi
+
+          echo "GitHub Release exists for ${TAG_NAME}, but the git tag is missing." >&2
+          exit 1
+      - run: npm ci
+        if: ${{ steps.detect.outputs.should_release == 'true' }}
       - run: npm run lint
+        if: ${{ steps.detect.outputs.should_release == 'true' }}
       - run: npm test
+        if: ${{ steps.detect.outputs.should_release == 'true' }}
       - run: npm run test:e2e
+        if: ${{ steps.detect.outputs.should_release == 'true' }}
       - name: Pack release tarball
         id: pack
+        if: ${{ steps.detect.outputs.should_release == 'true' }}
         run: |
           TARBALL=$(npm pack --json | node -e 'let input = ""; process.stdin.on("data", (chunk) => { input += chunk; }); process.stdin.on("end", () => { const parsed = JSON.parse(input); process.stdout.write(parsed[0].filename); });')
           echo "tarball=${TARBALL}" >> "${GITHUB_OUTPUT}"
       - name: Smoke test packaged CLI
+        if: ${{ steps.detect.outputs.should_release == 'true' }}
         env:
           TARBALL: ${{ steps.pack.outputs.tarball }}
         run: |
@@ -45,15 +108,25 @@ jobs:
 
           npm install -g "./${TARBALL}" --prefix "${PREFIX}"
 
-          EXPECTED_VERSION=$(node -p "require('./package.json').version")
+          EXPECTED_VERSION="${{ steps.detect.outputs.version }}"
           ACTUAL_VERSION="$("${PREFIX}/bin/karya" --version)"
 
           if [ "${ACTUAL_VERSION}" != "${EXPECTED_VERSION}" ]; then
             echo "Expected version ${EXPECTED_VERSION}, got ${ACTUAL_VERSION}." >&2
             exit 1
           fi
+      - name: Create release tag
+        if: ${{ steps.detect.outputs.should_release == 'true' && steps.detect.outputs.create_tag == 'true' }}
+        env:
+          TAG_NAME: ${{ steps.detect.outputs.tag_name }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "${TAG_NAME}" -m "${TAG_NAME}" "${GITHUB_SHA}"
+          git push origin "refs/tags/${TAG_NAME}"
       - name: Compute SHA256 checksum
         id: checksum
+        if: ${{ steps.detect.outputs.should_release == 'true' }}
         env:
           TARBALL: ${{ steps.pack.outputs.tarball }}
         run: |
@@ -61,14 +134,15 @@ jobs:
           echo "checksum_file=${TARBALL}.sha256" >> "${GITHUB_OUTPUT}"
       - name: Extract release notes from changelog
         id: release_notes
+        if: ${{ steps.detect.outputs.should_release == 'true' }}
         env:
           NOTES_PATH: ${{ runner.temp }}/release-notes.md
-          TAG_NAME: ${{ github.ref_name }}
+          VERSION: ${{ steps.detect.outputs.version }}
         run: |
           node <<'NODE'
           const fs = require("node:fs");
 
-          const version = process.env.TAG_NAME.replace(/^v/, "");
+          const version = process.env.VERSION;
           const changelog = fs.readFileSync("CHANGELOG.md", "utf8");
           const escapedVersion = version.replace(/\./g, "\\.");
           const pattern = new RegExp(
@@ -93,15 +167,15 @@ jobs:
 
           echo "path=${NOTES_PATH}" >> "${GITHUB_OUTPUT}"
       - name: Create GitHub Release
+        if: ${{ steps.detect.outputs.should_release == 'true' }}
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ steps.detect.outputs.tag_name }}
           body_path: ${{ steps.release_notes.outputs.path }}
           files: |
             ${{ steps.pack.outputs.tarball }}
             ${{ steps.checksum.outputs.checksum_file }}
           generate_release_notes: false
       - name: Publish to npm
-        if: ${{ secrets.NPM_TOKEN != '' }}
+        if: ${{ steps.detect.outputs.should_release == 'true' && env.NODE_AUTH_TOKEN != '' }}
         run: npm publish --provenance --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

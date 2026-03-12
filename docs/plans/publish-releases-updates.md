@@ -16,7 +16,7 @@ patterns from garth and the existing `ealt/homebrew-tap`.
 
 ## Changes
 
-### 1. `scripts/release.sh` (NEW) — release automation script
+### 1. `scripts/release.sh` (NEW) — release preparation script
 
 Conventions: bash, `set -euo pipefail`, section comments (matching `bin/karya`,
 `install.sh`).
@@ -25,9 +25,8 @@ Conventions: bash, `set -euo pipefail`, section comments (matching `bin/karya`,
 Usage: scripts/release.sh <patch|minor|major|X.Y.Z>
 ```
 
-Steps (in order — smoke test gates commit/tag):
-1. **Preflight** — clean tree, on `main` (overridable via `BRANCH=`), up-to-date
-   with remote, tag doesn't exist, `[Unreleased]` section non-empty
+Steps (in order — smoke test gates the release-prep commit):
+1. **Preflight** — clean tree, `[Unreleased]` section non-empty
 2. **Local validation** — `npm run lint`, `npm test`, `npm run test:e2e`
 3. **Bump version** via `npm version --no-git-tag-version <version>`. Also runs
    `bun install` if available to keep `bun.lock` in sync.
@@ -42,31 +41,36 @@ Steps (in order — smoke test gates commit/tag):
    failure, automatically clean up with `git restore package.json
    package-lock.json bun.lock CHANGELOG.md` and print the same command for
    manual recovery, since the working tree was already mutated by steps 3-4.
-6. **Commit** as `chore: release vX.Y.Z`
-7. **Tag** with annotated tag `vX.Y.Z`
-8. **Prompt to push** (auto-push if `PUSH=1`)
+6. **Commit** as `chore: prepare release vX.Y.Z`
+7. **Stop there** — open a PR or merge that commit to `main`; CI handles the
+   tag and GitHub Release automatically after merge
 
 ### 2. `.github/workflows/publish.yml` → `release.yml` (RENAME + REWORK)
 
 Single authoritative build trigger: `prepack` in package.json (see #7). The
-workflow calls `npm pack` which triggers the build automatically.
+workflow runs on pushes to `main`, detects the current package version, and
+releases automatically when that version does not already have a matching tag
+and GitHub Release.
 
 Pipeline:
 1. Checkout + setup Node 20
-2. `npm ci`
-3. **Verify tag matches package.json** (pattern from virgil)
-4. `npm run lint`
-5. `npm test`
-6. `npm run test:e2e`
-7. `npm pack` (triggers `prepack` → `npm run build` automatically)
-8. **Smoke test** — install tarball in temp prefix, run
+2. **Detect release state** — read `package.json` version, check for git tag
+   `vX.Y.Z`, check for GitHub Release `vX.Y.Z`
+3. **Skip** if both already exist
+4. `npm ci`
+5. `npm run lint`
+6. `npm test`
+7. `npm run test:e2e`
+8. `npm pack` (triggers `prepack` → `npm run build` automatically)
+9. **Smoke test** — install tarball in temp prefix, run
    `<prefix>/bin/karya --version`, verify output
-9. Compute SHA256 checksum (pattern from garth)
-10. Extract release notes from CHANGELOG.md — match `^## \[X.Y.Z\]` header,
+10. **Create tag** if needed, pointing at the merged `main` commit
+11. Compute SHA256 checksum (pattern from garth)
+12. Extract release notes from CHANGELOG.md — match `^## \[X.Y.Z\]` header,
     capture everything until the next `^## \[` line, trim leading/trailing
     blank lines
-11. Create GitHub Release with tarball + checksum
-12. npm publish (conditional, gated on NPM_TOKEN secret)
+13. Create GitHub Release with tarball + checksum
+14. npm publish (conditional, gated on NPM_TOKEN secret)
 
 ### 3. `.github/workflows/notify-homebrew-tap.yml` (NEW)
 
@@ -108,8 +112,8 @@ Update install section:
 
 ### 9. `CONTRIBUTING.md` (MODIFY)
 
-Add "Releasing" section documenting the release script and what happens after
-push.
+Add "Releasing" section documenting the release-prep script and the automatic
+`main`-driven publish flow.
 
 ### 10. `CHANGELOG.md` (MODIFY)
 
