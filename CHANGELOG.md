@@ -18,6 +18,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Release automation script for versioning, changelog updates, and tarball smoke
   testing
 - Homebrew tap notification workflow for published releases
+- Main-driven release workflow that publishes automatically when a new version
+  lands on `main`
 
 ### Removed
 
@@ -29,6 +31,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - `npm pack` now builds distributable artifacts via `prepack`
 - CLI now exposes `karya --version`
 - CI runs CLI e2e coverage explicitly
+- Release preparation now stops at a version-bump commit; CI creates the tag and
+  GitHub Release after merge
 
 ## [0.1.0] - 2025-05-15
 
