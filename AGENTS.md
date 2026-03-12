@@ -12,7 +12,7 @@ bun install
 bun run dev -- <command>
 
 # Run CLI (Node fallback)
-npm run dev:node -- <command>
+bun run dev:node -- <command>
 
 # Build
 bun run build          # tsc -> dist/

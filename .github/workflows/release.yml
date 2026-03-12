@@ -21,6 +21,9 @@ jobs:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
       - uses: actions/setup-node@v6
         with:
           node-version: 20
@@ -84,13 +87,13 @@ jobs:
 
           echo "GitHub Release exists for ${TAG_NAME}, but the git tag is missing." >&2
           exit 1
-      - run: npm ci
+      - run: bun install --frozen-lockfile
         if: ${{ steps.detect.outputs.should_release == 'true' }}
-      - run: npm run lint
+      - run: bun run lint
         if: ${{ steps.detect.outputs.should_release == 'true' }}
-      - run: npm test
+      - run: bun run test
         if: ${{ steps.detect.outputs.should_release == 'true' }}
-      - run: npm run test:e2e
+      - run: bun run test:e2e
         if: ${{ steps.detect.outputs.should_release == 'true' }}
       - name: Pack release tarball
         id: pack

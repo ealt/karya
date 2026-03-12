@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-03-12
+
 ### Added
 
 - PostgreSQL SSL/TLS support (`verify-full` default, `off` for local dev)
@@ -46,5 +48,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - JSON export/import for portability
 - Legacy JSON file migration path
 
-[Unreleased]: https://github.com/ealt/karya/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/ealt/karya/compare/v0.1.1...HEAD
 [0.1.0]: https://github.com/ealt/karya/releases/tag/v0.1.0
+[0.1.1]: https://github.com/ealt/karya/releases/tag/v0.1.1

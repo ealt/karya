@@ -8,7 +8,7 @@ cd "${PROJECT_ROOT}"
 DEFAULT_BRANCH="${BRANCH:-main}"
 CHANGELOG_FILE="CHANGELOG.md"
 REPO_URL="https://github.com/ealt/karya"
-FILES_TO_RESTORE=(package.json package-lock.json bun.lock CHANGELOG.md)
+FILES_TO_RESTORE=(package.json bun.lock CHANGELOG.md)
 CLEANUP_REQUIRED=0
 PACKED_TARBALL=""
 SMOKE_PREFIX=""
@@ -211,8 +211,9 @@ if [ "${1}" = "--help" ] || [ "${1}" = "-h" ]; then
 fi
 
 command -v git >/dev/null 2>&1 || fail "git is required"
-command -v node >/dev/null 2>&1 || fail "node is required"
-command -v npm >/dev/null 2>&1 || fail "npm is required"
+command -v bun >/dev/null 2>&1 || fail "bun is required"
+command -v node >/dev/null 2>&1 || fail "node is required (for npm pack)"
+command -v npm >/dev/null 2>&1 || fail "npm is required (for npm pack/version)"
 
 RELEASE_INPUT=$1
 TARGET_VERSION="$(resolve_target_version "${RELEASE_INPUT}")"
@@ -223,9 +224,9 @@ require_clean_tree
 verify_unreleased_section
 
 section "Local validation"
-npm run lint
-npm test
-npm run test:e2e
+bun run lint
+bun run test
+bun run test:e2e
 
 section "Version bump"
 npm version --no-git-tag-version "${RELEASE_INPUT}" >/dev/null
@@ -246,7 +247,7 @@ section "Pack and smoke test"
 smoke_test_tarball "${TARGET_VERSION}"
 
 section "Commit"
-git add package.json package-lock.json bun.lock CHANGELOG.md
+git add package.json bun.lock CHANGELOG.md
 git commit -m "chore: prepare release ${TAG_NAME}"
 CLEANUP_REQUIRED=0
 

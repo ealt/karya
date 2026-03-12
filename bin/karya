@@ -12,6 +12,9 @@ PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 DIST_ENTRY="${PROJECT_ROOT}/dist/src/cli/index.js"
 
 if [ -f "$DIST_ENTRY" ]; then
+  if command -v bun >/dev/null 2>&1; then
+    exec bun "$DIST_ENTRY" "$@"
+  fi
   exec node "$DIST_ENTRY" "$@"
 fi
 
