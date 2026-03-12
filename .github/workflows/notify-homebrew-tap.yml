@@ -43,4 +43,4 @@ jobs:
             -H "Accept: application/vnd.github+json" \
             -H "Authorization: Bearer ${GITHUB_TOKEN}" \
             https://api.github.com/repos/ealt/homebrew-tap/dispatches \
-            -d "$(printf '{"event_type":"karya_release_published","client_payload":{"tag":"%s"}}' "${TAG_NAME}")"
+            -d "$(printf '{"event_type":"karya_release_published","client_payload":{"release_tag":"%s"}}' "${TAG_NAME}")"
