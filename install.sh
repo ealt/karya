@@ -3,23 +3,23 @@ set -euo pipefail
 
 REPO="ealt/karya"
 
-# --- Check Node.js -----------------------------------------------------------
+# --- Check runtime ------------------------------------------------------------
 
-if ! command -v node >/dev/null 2>&1; then
-  echo "Error: Node.js is not installed. Install Node.js 18+ and try again." >&2
-  exit 1
-fi
-
-NODE_MAJOR=$(node -e "process.stdout.write(String(process.versions.node.split('.')[0]))")
-if [ "$NODE_MAJOR" -lt 18 ]; then
-  echo "Error: Node.js >= 18 required (found $(node --version))." >&2
-  exit 1
-fi
-
-# --- Check npm ----------------------------------------------------------------
-
-if ! command -v npm >/dev/null 2>&1; then
-  echo "Error: npm is not installed." >&2
+if command -v bun >/dev/null 2>&1; then
+  INSTALLER="bun"
+elif command -v node >/dev/null 2>&1; then
+  NODE_MAJOR=$(node -e "process.stdout.write(String(process.versions.node.split('.')[0]))")
+  if [ "$NODE_MAJOR" -lt 18 ]; then
+    echo "Error: Node.js >= 18 required (found $(node --version)). Install Bun or upgrade Node.js." >&2
+    exit 1
+  fi
+  if ! command -v npm >/dev/null 2>&1; then
+    echo "Error: npm is not installed. Install Bun (preferred) or npm." >&2
+    exit 1
+  fi
+  INSTALLER="npm"
+else
+  echo "Error: Bun or Node.js 18+ is required. Install Bun (https://bun.sh) and try again." >&2
   exit 1
 fi
 
@@ -48,7 +48,11 @@ trap 'rm -rf "$TMPDIR"' EXIT
 
 curl -fsSL -o "${TMPDIR}/${TARBALL}" "$DOWNLOAD_URL"
 
-npm install -g "${TMPDIR}/${TARBALL}"
+if [ "$INSTALLER" = "bun" ]; then
+  bun install -g "${TMPDIR}/${TARBALL}"
+else
+  npm install -g "${TMPDIR}/${TARBALL}"
+fi
 
 # --- Done ---------------------------------------------------------------------
 

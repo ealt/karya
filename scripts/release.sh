@@ -211,8 +211,9 @@ if [ "${1}" = "--help" ] || [ "${1}" = "-h" ]; then
 fi
 
 command -v git >/dev/null 2>&1 || fail "git is required"
-command -v node >/dev/null 2>&1 || fail "node is required"
-command -v npm >/dev/null 2>&1 || fail "npm is required"
+command -v bun >/dev/null 2>&1 || fail "bun is required"
+command -v node >/dev/null 2>&1 || fail "node is required (for npm pack)"
+command -v npm >/dev/null 2>&1 || fail "npm is required (for npm pack/version)"
 
 RELEASE_INPUT=$1
 TARGET_VERSION="$(resolve_target_version "${RELEASE_INPUT}")"
@@ -223,9 +224,9 @@ require_clean_tree
 verify_unreleased_section
 
 section "Local validation"
-npm run lint
-npm test
-npm run test:e2e
+bun run lint
+bun run test
+bun run test:e2e
 
 section "Version bump"
 npm version --no-git-tag-version "${RELEASE_INPUT}" >/dev/null

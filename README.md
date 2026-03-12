@@ -110,4 +110,4 @@ bun run test:e2e
 bun run lint
 ```
 
-Node fallback: `npm run dev:node -- --help`
+Node fallback: `bun run dev:node -- --help`

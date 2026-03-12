@@ -10,7 +10,7 @@ bun link       # Makes `karya` available as a global command
 ```
 
 Requires [Bun](https://bun.sh/) v1.2.5+. Node.js 22+ works as a fallback
-(`npm install` + `npm run dev:node`), but `bun link` requires Bun.
+(`npm install` + `bun run dev:node`), but `bun link` requires Bun.
 
 ## Development workflow
 
@@ -40,7 +40,7 @@ patterns.
 Prepare a release bump on a feature branch:
 
 ```bash
-npm run release -- patch
+bun run release -- patch
 ```
 
 The release script runs local validation, bumps the version, moves

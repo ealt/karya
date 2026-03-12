@@ -32,7 +32,7 @@
     "test": "vitest run",
     "test:e2e": "vitest run tests/e2e",
     "lint": "tsc --noEmit -p tsconfig.json",
-    "prepack": "npm run build"
+    "prepack": "bun run build"
   },
   "dependencies": {
     "better-sqlite3": "^11.10.0",
