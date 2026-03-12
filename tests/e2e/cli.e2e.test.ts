@@ -1,11 +1,15 @@
 import { execFile } from "node:child_process";
 import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
+import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
+import { fileURLToPath } from "node:url";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { describe, expect, it } from "vitest";
 
 const execFileAsync = promisify(execFile);
+const projectRoot = fileURLToPath(new URL("../../", import.meta.url));
+const { version } = createRequire(import.meta.url)("../../package.json") as { version: string };
 
 interface CliResult {
   stdout: string;
@@ -16,7 +20,7 @@ interface CliResult {
 async function runCli(args: string[], homeDir: string): Promise<CliResult> {
   try {
     const { stdout, stderr } = await execFileAsync("node", ["--import", "tsx", "src/cli/index.ts", ...args], {
-      cwd: process.cwd(),
+      cwd: projectRoot,
       env: {
         ...process.env,
         HOME: homeDir,
@@ -41,6 +45,16 @@ async function runCli(args: string[], homeDir: string): Promise<CliResult> {
 }
 
 describe("CLI e2e", () => {
+  it("prints the CLI version", async () => {
+    const root = await mkdtemp(join(tmpdir(), "karya-e2e-version-"));
+    const homeDir = join(root, "home");
+    await mkdir(homeDir, { recursive: true });
+
+    const result = await runCli(["--version"], homeDir);
+    expect(result.code).toBe(0);
+    expect(result.stdout.trim()).toBe(version);
+  });
+
   it(
     "handles init -> add -> done -> archive restore workflow",
     async () => {

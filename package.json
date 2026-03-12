@@ -28,10 +28,11 @@
     "build": "tsc -p tsconfig.json",
     "dev": "bun run src/cli/index.ts",
     "dev:node": "node --import tsx src/cli/index.ts",
+    "release": "bash scripts/release.sh",
     "test": "vitest run",
     "test:e2e": "vitest run tests/e2e",
     "lint": "tsc --noEmit -p tsconfig.json",
-    "prepublishOnly": "npm run build"
+    "prepack": "npm run build"
   },
   "dependencies": {
     "better-sqlite3": "^11.10.0",

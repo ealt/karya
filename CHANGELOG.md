@@ -15,6 +15,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Install script (`install.sh`) for `curl | bash` installation via GitHub
   Releases
 - GitHub Release now includes npm tarball as a release asset
+- Release automation script for versioning, changelog updates, and tarball smoke
+  testing
+- Homebrew tap notification workflow for published releases
 
 ### Removed
 
@@ -23,6 +26,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ### Changed
 
 - npm publish step is gated on `NPM_TOKEN` secret being configured
+- `npm pack` now builds distributable artifacts via `prepack`
+- CLI now exposes `karya --version`
+- CI runs CLI e2e coverage explicitly
 
 ## [0.1.0] - 2025-05-15
 

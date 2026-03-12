@@ -1,0 +1,46 @@
+name: Notify Homebrew Tap
+on:
+  release:
+    types:
+      - published
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to dispatch
+        required: true
+        type: string
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve tag
+        id: tag
+        env:
+          MANUAL_TAG: ${{ inputs.tag }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          TAG_NAME="${RELEASE_TAG:-${MANUAL_TAG:-}}"
+
+          if [ -z "${TAG_NAME}" ]; then
+            echo "No release tag available." >&2
+            exit 1
+          fi
+
+          echo "tag=${TAG_NAME}" >> "${GITHUB_OUTPUT}"
+      - name: Dispatch release event to tap
+        env:
+          GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_FINE_GRAINED_PAT }}
+          TAG_NAME: ${{ steps.tag.outputs.tag }}
+        run: |
+          if [ -z "${GITHUB_TOKEN}" ]; then
+            echo "HOMEBREW_TAP_FINE_GRAINED_PAT is not configured." >&2
+            exit 1
+          fi
+
+          curl -fsSL \
+            -X POST \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+            https://api.github.com/repos/ealt/homebrew-tap/dispatches \
+            -d "$(printf '{"event_type":"karya_release_published","client_payload":{"tag":"%s"}}' "${TAG_NAME}")"

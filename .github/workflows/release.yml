@@ -1,0 +1,107 @@
+name: Release
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          registry-url: https://registry.npmjs.org
+      - run: npm ci
+      - name: Verify tag matches package version
+        env:
+          TAG_NAME: ${{ github.ref_name }}
+        run: |
+          PACKAGE_VERSION=$(node -p "require('./package.json').version")
+          EXPECTED_TAG="v${PACKAGE_VERSION}"
+
+          if [ "${TAG_NAME}" != "${EXPECTED_TAG}" ]; then
+            echo "Expected tag ${EXPECTED_TAG}, got ${TAG_NAME}." >&2
+            exit 1
+          fi
+      - run: npm run lint
+      - run: npm test
+      - run: npm run test:e2e
+      - name: Pack release tarball
+        id: pack
+        run: |
+          TARBALL=$(npm pack --json | node -e 'let input = ""; process.stdin.on("data", (chunk) => { input += chunk; }); process.stdin.on("end", () => { const parsed = JSON.parse(input); process.stdout.write(parsed[0].filename); });')
+          echo "tarball=${TARBALL}" >> "${GITHUB_OUTPUT}"
+      - name: Smoke test packaged CLI
+        env:
+          TARBALL: ${{ steps.pack.outputs.tarball }}
+        run: |
+          PREFIX="$(mktemp -d "${PWD}/.karya-smoke.XXXXXX")"
+          trap 'rm -rf "${PREFIX}"' EXIT
+
+          npm install -g "./${TARBALL}" --prefix "${PREFIX}"
+
+          EXPECTED_VERSION=$(node -p "require('./package.json').version")
+          ACTUAL_VERSION="$("${PREFIX}/bin/karya" --version)"
+
+          if [ "${ACTUAL_VERSION}" != "${EXPECTED_VERSION}" ]; then
+            echo "Expected version ${EXPECTED_VERSION}, got ${ACTUAL_VERSION}." >&2
+            exit 1
+          fi
+      - name: Compute SHA256 checksum
+        id: checksum
+        env:
+          TARBALL: ${{ steps.pack.outputs.tarball }}
+        run: |
+          sha256sum "${TARBALL}" > "${TARBALL}.sha256"
+          echo "checksum_file=${TARBALL}.sha256" >> "${GITHUB_OUTPUT}"
+      - name: Extract release notes from changelog
+        id: release_notes
+        env:
+          NOTES_PATH: ${{ runner.temp }}/release-notes.md
+          TAG_NAME: ${{ github.ref_name }}
+        run: |
+          node <<'NODE'
+          const fs = require("node:fs");
+
+          const version = process.env.TAG_NAME.replace(/^v/, "");
+          const changelog = fs.readFileSync("CHANGELOG.md", "utf8");
+          const escapedVersion = version.replace(/\./g, "\\.");
+          const pattern = new RegExp(
+            `^## \\[${escapedVersion}\\][^\\n]*\\n([\\s\\S]*?)(?=^## \\[[^\\]]+\\]|^\\[[^\\]]+\\]:)`,
+            "m",
+          );
+          const match = changelog.match(pattern);
+
+          if (!match) {
+            console.error(`Unable to find CHANGELOG entry for ${version}.`);
+            process.exit(1);
+          }
+
+          const notes = match[1].trim();
+          if (!notes) {
+            console.error(`CHANGELOG entry for ${version} is empty.`);
+            process.exit(1);
+          }
+
+          fs.writeFileSync(process.env.NOTES_PATH, `${notes}\n`, "utf8");
+          NODE
+
+          echo "path=${NOTES_PATH}" >> "${GITHUB_OUTPUT}"
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          body_path: ${{ steps.release_notes.outputs.path }}
+          files: |
+            ${{ steps.pack.outputs.tarball }}
+            ${{ steps.checksum.outputs.checksum_file }}
+          generate_release_notes: false
+      - name: Publish to npm
+        if: ${{ secrets.NPM_TOKEN != '' }}
+        run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
