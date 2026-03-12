@@ -2,6 +2,8 @@
 
 > *Sanskrit: "what ought to be done"*
 
+![banner](banner.png)
+
 SQL-backed task tracker for orchestrating AI agents across machines. CLI-first,
 portable via JSON export/import, with SQLite local storage and optional
 PostgreSQL backend.
@@ -110,4 +112,4 @@ bun run test:e2e
 bun run lint
 ```
 
-Node fallback: `bun run dev:node -- --help`
+Node fallback: `npm run dev:node -- --help`
