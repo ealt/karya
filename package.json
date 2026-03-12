@@ -1,6 +1,6 @@
 {
   "name": "karya",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "SQL-backed task tracker for AI agent workflows",
   "type": "module",
   "license": "MIT",
