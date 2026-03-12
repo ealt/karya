@@ -35,11 +35,13 @@ Steps (in order — smoke test gates commit/tag):
    `## [X.Y.Z] - YYYY-MM-DD` section, reset `[Unreleased]`, update comparison
    links
 5. **Pack + smoke test** — `npm pack`, install tarball to temp prefix, run
-   `<prefix>/bin/karya --version`, verify output matches version. This gates
+   `<prefix>/bin/karya --version`, verify output matches version. Use a
+   repo-local temp prefix instead of `/tmp` so the binary remains executable on
+   environments that mount `/tmp` with `noexec`. This gates
    the commit — if the tarball is broken, nothing is committed or tagged. On
    failure, automatically clean up with `git restore package.json
-   package-lock.json CHANGELOG.md` and print the same command for manual
-   recovery, since the working tree was already mutated by steps 3-4.
+   package-lock.json bun.lock CHANGELOG.md` and print the same command for
+   manual recovery, since the working tree was already mutated by steps 3-4.
 6. **Commit** as `chore: release vX.Y.Z`
 7. **Tag** with annotated tag `vX.Y.Z`
 8. **Prompt to push** (auto-push if `PUSH=1`)
@@ -132,6 +134,7 @@ Needed in the tap repo, documented for follow-up:
 | `tests/e2e/cli.e2e.test.ts` | Fix hardcoded cwd |
 | `src/cli/index.ts` | Add `--version` flag |
 | `package.json` | Add `release` script, `prepack` |
+| `bun.lock` | Updated by release script when available |
 | `README.md` | Update install section |
 | `CONTRIBUTING.md` | Add releasing section |
 | `CHANGELOG.md` | Add entries |
@@ -144,7 +147,7 @@ Needed in the tap repo, documented for follow-up:
 4. `bash scripts/release.sh` with no args — shows usage
 5. **Smoke test the packaging path end-to-end:**
    - `npm pack` (triggers prepack → build)
-   - `npm install -g ./karya-*.tgz --prefix /tmp/karya-smoke`
-   - `/tmp/karya-smoke/bin/karya --version` outputs correct version
+   - `npm install -g ./karya-*.tgz --prefix ./.tmp/karya-smoke`
+   - `./.tmp/karya-smoke/bin/karya --version` outputs correct version
    - Validates the full install path used by `install.sh`
 6. Review workflow YAML for correctness

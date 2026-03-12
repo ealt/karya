@@ -35,6 +35,24 @@ patterns.
 3. Ensure `bun run lint` and `bun run test` pass
 4. Submit a pull request
 
+## Releasing
+
+Create a release from a clean `main` checkout:
+
+```bash
+npm run release -- patch
+```
+
+The release script runs local validation, bumps the version, moves
+`CHANGELOG.md` entries out of `[Unreleased]`, smoke-tests the packaged tarball,
+then creates the release commit and annotated tag. Push the branch and tag when
+prompted, or set `PUSH=1` to push automatically.
+
+After the tag is pushed, GitHub Actions publishes the tarball and checksum to a
+GitHub Release. If `NPM_TOKEN` is configured, the same workflow can also publish
+to npm. A separate workflow notifies `ealt/homebrew-tap` when the release is
+published.
+
 ## Code conventions
 
 - TypeScript strict mode

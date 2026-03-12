@@ -9,16 +9,18 @@ PostgreSQL backend.
 ## Install
 
 ```bash
+brew install ealt/tap/karya
+```
+
+Alternative:
+
+```bash
 curl -fsSL https://raw.githubusercontent.com/ealt/karya/main/install.sh | bash
 ```
 
-Or with npm (once published):
+npm publishing is reserved for a future release path.
 
-```bash
-npm install -g karya
-```
-
-Then:
+Then initialize a local database and start working:
 
 ```bash
 karya config init
