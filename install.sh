@@ -49,7 +49,8 @@ trap 'rm -rf "$TMPDIR"' EXIT
 curl -fsSL -o "${TMPDIR}/${TARBALL}" "$DOWNLOAD_URL"
 
 if [ "$INSTALLER" = "bun" ]; then
-  bun install -g "${TMPDIR}/${TARBALL}"
+  bun remove -g karya 2>/dev/null || true
+  bun add -g "${TMPDIR}/${TARBALL}"
 else
   npm install -g "${TMPDIR}/${TARBALL}"
 fi
