@@ -1,8 +1,22 @@
 import { mkdtemp, mkdir, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getAppConfigPath, loadAppConfig, resolveConfig, setAppConfigValue } from "../../src/core/config.js";
+import { KaryaError } from "../../src/core/errors.js";
+
+const mockState = vi.hoisted(() => {
+  const resolveOpReferenceMock = vi.fn();
+  return { resolveOpReferenceMock };
+});
+
+vi.mock("../../src/core/op-resolve.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../src/core/op-resolve.js")>();
+  return {
+    ...actual,
+    resolveOpReference: mockState.resolveOpReferenceMock,
+  };
+});
 
 const ENV_KEYS = [
   "HOME",
@@ -140,5 +154,70 @@ describe("loadAppConfig legacy keys", () => {
     }
     expect(config.backend.connectionString).toBe("postgresql://localhost/custom");
     expect(config.backend.ssl).toBe("off");
+  });
+});
+
+describe("resolveConfig op:// connection string", () => {
+  beforeEach(() => {
+    mockState.resolveOpReferenceMock.mockReset();
+  });
+
+  it("resolves op:// connection string from env var", async () => {
+    process.env.KARYA_BACKEND = "pg";
+    process.env.KARYA_PG_CONNECTION_STRING = "op://vault/pg/connstring";
+    mockState.resolveOpReferenceMock.mockResolvedValueOnce("postgresql://resolved@host/db");
+
+    const config = await resolveConfig();
+
+    expect(config.backend.type).toBe("pg");
+    if (config.backend.type !== "pg") throw new Error("expected pg");
+    expect(config.backend.connectionString).toBe("postgresql://resolved@host/db");
+    expect(mockState.resolveOpReferenceMock).toHaveBeenCalledWith("op://vault/pg/connstring");
+  });
+
+  it("does not call resolveOpReference for regular connection strings", async () => {
+    process.env.KARYA_BACKEND = "pg";
+    process.env.KARYA_PG_CONNECTION_STRING = "postgresql://localhost/karya";
+
+    const config = await resolveConfig();
+
+    expect(config.backend.type).toBe("pg");
+    if (config.backend.type !== "pg") throw new Error("expected pg");
+    expect(config.backend.connectionString).toBe("postgresql://localhost/karya");
+    expect(mockState.resolveOpReferenceMock).not.toHaveBeenCalled();
+  });
+
+  it("propagates KaryaError from op resolution", async () => {
+    process.env.KARYA_BACKEND = "pg";
+    process.env.KARYA_PG_CONNECTION_STRING = "op://vault/pg/connstring";
+    mockState.resolveOpReferenceMock.mockRejectedValueOnce(
+      new KaryaError("1Password CLI (op) is not installed or not in PATH.", "CONFIG"),
+    );
+
+    await expect(resolveConfig()).rejects.toThrow("1Password CLI (op) is not installed");
+  });
+
+  it("resolves op:// connection string from app config", async () => {
+    const configPath = getAppConfigPath();
+    await mkdir(join(process.env.HOME as string, ".config", "karya"), { recursive: true });
+    await writeFile(
+      configPath,
+      JSON.stringify({
+        backend: {
+          type: "pg",
+          connectionString: "op://work/database/url",
+          ssl: "off",
+        },
+      }),
+      "utf8",
+    );
+    mockState.resolveOpReferenceMock.mockResolvedValueOnce("postgresql://fromconfig@host/db");
+
+    const config = await resolveConfig();
+
+    expect(config.backend.type).toBe("pg");
+    if (config.backend.type !== "pg") throw new Error("expected pg");
+    expect(config.backend.connectionString).toBe("postgresql://fromconfig@host/db");
+    expect(mockState.resolveOpReferenceMock).toHaveBeenCalledWith("op://work/database/url");
   });
 });

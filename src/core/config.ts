@@ -3,6 +3,7 @@ import { constants as fsConstants } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { KaryaError } from "./errors.js";
+import { isOpReference, resolveOpReference } from "./op-resolve.js";
 import { AppConfigSchema, type AppConfig, type BackendConfig, type Priority } from "./schema.js";
 import { DEFAULT_BACKEND_TYPE, DEFAULT_FORMAT, DEFAULT_PRIORITY, DEFAULT_PROJECT } from "../shared/constants.js";
 
@@ -289,13 +290,17 @@ export async function resolveConfig(options: ResolveConfigOptions = {}): Promise
   if (backendType === "sqlite") {
     backend = sqliteBackend(resolveSqlitePath(options, appConfig));
   } else {
-    const connectionString =
+    let connectionString =
       options.connectionString ??
       env.KARYA_PG_CONNECTION_STRING ??
       (appConfig.backend?.type === "pg" ? appConfig.backend.connectionString : undefined);
 
     if (!connectionString) {
       throw new KaryaError("PostgreSQL backend requires connection string", "CONFIG");
+    }
+
+    if (isOpReference(connectionString)) {
+      connectionString = await resolveOpReference(connectionString);
     }
 
     const ssl =
