@@ -171,7 +171,7 @@ jobs:
           echo "path=${NOTES_PATH}" >> "${GITHUB_OUTPUT}"
       - name: Create GitHub Release
         if: ${{ steps.detect.outputs.should_release == 'true' }}
-        uses: softprops/action-gh-release@v2.5.0
+        uses: softprops/action-gh-release@v2.6.1
         with:
           tag_name: ${{ steps.detect.outputs.tag_name }}
           body_path: ${{ steps.release_notes.outputs.path }}
