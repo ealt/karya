@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-03-19
+
+### Added
+
+- 1Password secret reference support for PostgreSQL connection strings — store
+  `op://vault/item/field` in config or env vars and karya resolves it at runtime
+  via `op read`, keeping plaintext credentials off disk
+
 ## [0.1.1] - 2026-03-12
 
 ### Added
@@ -48,6 +56,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - JSON export/import for portability
 - Legacy JSON file migration path
 
-[Unreleased]: https://github.com/ealt/karya/compare/v0.1.1...HEAD
-[0.1.0]: https://github.com/ealt/karya/releases/tag/v0.1.0
+[Unreleased]: https://github.com/ealt/karya/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/ealt/karya/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/ealt/karya/releases/tag/v0.1.1
+[0.1.0]: https://github.com/ealt/karya/releases/tag/v0.1.0
