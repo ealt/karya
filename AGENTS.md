@@ -95,7 +95,6 @@ Relevant env vars:
 - Optional CA path supports `~/...` expansion via `backend.sslCaPath` /
   `KARYA_PG_SSL_CA`
 
-
 ## Patterns
 
 - Zod schemas in `src/core/schema.ts` are the type source of truth
