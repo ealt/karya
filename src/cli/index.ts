@@ -30,10 +30,8 @@ program
   .description("SQL-backed task tracker for orchestrating AI agents")
   .version(version)
   .option("--db-path <path>", "Override SQLite database path")
-  .option("--data-dir <path>", "Legacy alias; interpreted as <path>/karya.db")
   .option("--format <format>", "Output format: human|json")
-  .option("--author <author>", "Author metadata for updates")
-  .option("--skip-legacy-check", "Skip legacy JSON task directory detection")
+  .option("--author <author>", "Author alias for updates")
   .showHelpAfterError();
 
 registerCommands(program, createCliRuntime(program));

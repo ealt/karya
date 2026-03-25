@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
@@ -56,88 +56,89 @@ describe("CLI e2e", () => {
   });
 
   it(
-    "handles init -> add -> done -> archive restore workflow",
+    "handles setup -> add -> edit status -> list workflow",
     async () => {
       const root = await mkdtemp(join(tmpdir(), "karya-e2e-"));
       const dbPath = join(root, "karya.db");
       const homeDir = join(root, "home");
       await mkdir(homeDir, { recursive: true });
 
-      expect((await runCli(["--db-path", dbPath, "config", "init"], homeDir)).code).toBe(0);
+      expect(
+        (
+          await runCli(
+            ["--db-path", dbPath, "--format", "json", "setup", "--alias", "ealt", "--name", "Eric Alt"],
+            homeDir,
+          )
+        ).code,
+      ).toBe(0);
 
-      const addOut = await runCli(
-        [
-          "--db-path",
-          dbPath,
-          "--format",
-          "json",
-          "add",
-          "Ship MVP",
-          "-P",
-          "P1",
-          "--due",
-          "tomorrow",
-          "--note",
-          "initial context",
-        ],
-        homeDir,
-      );
-
+      const addOut = await runCli(["--db-path", dbPath, "--format", "json", "add", "Ship MVP", "--note", "initial"], homeDir);
       expect(addOut.code).toBe(0);
       const addJson = JSON.parse(addOut.stdout) as { data: { id: string } };
       const taskId = addJson.data.id;
-      expect(taskId).toHaveLength(8);
 
-      const listOut = await runCli(["--db-path", dbPath, "--format", "json", "list"], homeDir);
+      expect((await runCli(["--db-path", dbPath, "edit", taskId, "--status", "done"], homeDir)).code).toBe(0);
+
+      const listOut = await runCli(["--db-path", dbPath, "--format", "json", "list", "--status", "done"], homeDir);
       expect(listOut.code).toBe(0);
-      const listJson = JSON.parse(listOut.stdout) as { data: Array<{ id: string }> };
+      const listJson = JSON.parse(listOut.stdout) as { data: Array<{ id: string; status: string }> };
       expect(listJson.data.map((task) => task.id)).toContain(taskId);
 
-      expect((await runCli(["--db-path", dbPath, "done", taskId], homeDir)).code).toBe(0);
-
-      const activeOut = await runCli(["--db-path", dbPath, "--format", "json", "list", "--status", "open,in_progress"], homeDir);
-      const activeJson = JSON.parse(activeOut.stdout) as { data: Array<{ id: string }> };
-      expect(activeJson.data.map((task) => task.id)).not.toContain(taskId);
-
-      const archiveOut = await runCli(["--db-path", dbPath, "--format", "json", "archive", "list"], homeDir);
-      const archiveJson = JSON.parse(archiveOut.stdout) as { data: Array<{ id: string }> };
-      expect(archiveJson.data.map((task) => task.id)).toContain(taskId);
-
-      expect((await runCli(["--db-path", dbPath, "archive", "restore", taskId], homeDir)).code).toBe(0);
-
-      const showByPrefix = await runCli(["--db-path", dbPath, "--format", "json", "show", taskId.slice(0, 4)], homeDir);
-      const showJson = JSON.parse(showByPrefix.stdout) as { data: { id: string; status: string } };
-      expect(showJson.data.id).toBe(taskId);
-      expect(showJson.data.status).toBe("open");
+      const showOut = await runCli(["--db-path", dbPath, "--format", "json", "show", taskId.slice(0, 4)], homeDir);
+      const showJson = JSON.parse(showOut.stdout) as { data: { task: { id: string; note: string | null } } };
+      expect(showJson.data.task.id).toBe(taskId);
+      expect(showJson.data.task.note).toBe("initial");
     },
     20000,
   );
 
-  it("blocks on legacy task directories unless explicitly skipped", async () => {
-    const root = await mkdtemp(join(tmpdir(), "karya-e2e-legacy-"));
+  it("rejects old archive and transition commands", async () => {
+    const root = await mkdtemp(join(tmpdir(), "karya-e2e-unknown-"));
     const homeDir = join(root, "home");
-    const dbPath = join(root, "karya.db");
-    const tasksDir = join(root, "tasks");
-
     await mkdir(homeDir, { recursive: true });
-    await mkdir(tasksDir, { recursive: true });
-    await writeFile(join(tasksDir, "abcd1234.json"), "{}\n", "utf8");
 
-    const blocked = await runCli(["--db-path", dbPath, "list"], homeDir);
-    expect(blocked.code).toBe(1);
-    expect(blocked.stdout).toContain("Legacy JSON task data detected");
-
-    const bypassed = await runCli(["--db-path", dbPath, "--skip-legacy-check", "list"], homeDir);
-    expect(bypassed.code).toBe(0);
+    for (const command of [["archive"], ["start", "abcd1234"], ["done", "abcd1234"], ["cancel", "abcd1234"]]) {
+      const result = await runCli(command, homeDir);
+      expect(result.code).toBe(1);
+      expect(`${result.stdout}\n${result.stderr}`.toLowerCase()).toContain("unknown command");
+    }
   });
 
-  it("does not expose a serve command", async () => {
-    const root = await mkdtemp(join(tmpdir(), "karya-e2e-serve-"));
+  it(
+    "supports user CRUD via CLI",
+    async () => {
+      const root = await mkdtemp(join(tmpdir(), "karya-e2e-users-"));
+      const dbPath = join(root, "karya.db");
+      const homeDir = join(root, "home");
+      await mkdir(homeDir, { recursive: true });
+
+      await runCli(["--db-path", dbPath, "config", "init"], homeDir);
+      await runCli(["--db-path", dbPath, "users", "add", "--name", "Eric Alt", "--alias", "ealt"], homeDir);
+      await runCli(["--db-path", dbPath, "config", "set", "author", "ealt"], homeDir);
+      const addAgent = await runCli(
+        ["--db-path", dbPath, "users", "add", "--name", "fraxl", "--alias", "fraxl", "--type", "agent"],
+        homeDir,
+      );
+      expect(addAgent.code).toBe(0);
+
+      const listUsers = await runCli(["--db-path", dbPath, "--format", "json", "users", "list"], homeDir);
+      const usersJson = JSON.parse(listUsers.stdout) as { data: Array<{ alias: string }> };
+      expect(usersJson.data.map((user) => user.alias)).toEqual(expect.arrayContaining(["ealt", "fraxl"]));
+
+      const deactivate = await runCli(["--db-path", dbPath, "users", "remove", "fraxl"], homeDir);
+      expect(deactivate.code).toBe(0);
+    },
+    20000,
+  );
+
+  it("fails mutating commands without setup", async () => {
+    const root = await mkdtemp(join(tmpdir(), "karya-e2e-nosetup-"));
+    const dbPath = join(root, "karya.db");
     const homeDir = join(root, "home");
     await mkdir(homeDir, { recursive: true });
 
-    const result = await runCli(["serve"], homeDir);
+    const result = await runCli(["--db-path", dbPath, "add", "Ship MVP"], homeDir);
     expect(result.code).toBe(1);
-    expect(`${result.stdout}\n${result.stderr}`.toLowerCase()).toContain("unknown command");
+    expect(result.stdout).toContain("No user configured. Run `karya setup` first.");
   });
 });

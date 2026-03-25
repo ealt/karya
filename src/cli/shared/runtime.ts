@@ -1,21 +1,33 @@
 import { Command } from "commander";
-import { detectLegacyData, type OutputFormat, type ResolveConfigOptions, resolveConfig } from "../../core/config.js";
+import { type OutputFormat, type ResolveConfigOptions, resolveConfig } from "../../core/config.js";
 import { createBackend } from "../../core/create-backend.js";
 import { KaryaError } from "../../core/errors.js";
 import { TaskStore } from "../../core/task-store.js";
+import { UserStore } from "../../core/user-store.js";
 import type { Warning } from "../../shared/types.js";
 import { render, type CommandOutput } from "../formatters/output.js";
 import type { DbBackend } from "../../core/backend.js";
+import type { User } from "../../core/schema.js";
 
 export interface CommandContext {
   config: Awaited<ReturnType<typeof resolveConfig>>;
   store: TaskStore;
+  userStore: UserStore;
   backend: DbBackend;
+  currentUser: User | null;
+}
+
+export interface RunCommandOptions {
+  requireActiveUser?: boolean;
 }
 
 export interface CliRuntime {
   parseCsv(input?: string): string[] | undefined;
-  runCommand(commandLike: unknown, handler: (context: CommandContext) => Promise<CommandOutput>): Promise<void>;
+  runCommand(
+    commandLike: unknown,
+    handler: (context: CommandContext) => Promise<CommandOutput>,
+    options?: RunCommandOptions,
+  ): Promise<void>;
   runWrite<T>(context: CommandContext, operation: () => Promise<T>): Promise<{ result: T; warnings: Warning[] }>;
 }
 
@@ -33,17 +45,6 @@ function parseGlobalOptionsFromArgv(argv: string[]): ResolveConfigOptions {
 
     if (token.startsWith("--db-path=")) {
       parsed.dbPath = token.split("=", 2)[1];
-      continue;
-    }
-
-    if (token === "--data-dir" && index + 1 < argv.length) {
-      parsed.dataDir = argv[index + 1];
-      index += 1;
-      continue;
-    }
-
-    if (token.startsWith("--data-dir=")) {
-      parsed.dataDir = token.split("=", 2)[1];
       continue;
     }
 
@@ -74,19 +75,13 @@ function parseGlobalOptionsFromArgv(argv: string[]): ResolveConfigOptions {
       parsed.author = token.split("=", 2)[1];
       continue;
     }
-
-    if (token === "--skip-legacy-check") {
-      parsed.skipLegacyCheck = true;
-      continue;
-    }
   }
 
   return parsed;
 }
 
 function getGlobalOptions(program: Command, commandLike: unknown): ResolveConfigOptions {
-  let opts: Record<string, unknown> = {};
-
+  let opts: Record<string, unknown>;
   if (
     commandLike &&
     typeof commandLike === "object" &&
@@ -111,11 +106,8 @@ function getGlobalOptions(program: Command, commandLike: unknown): ResolveConfig
 
   return {
     dbPath: argvParsed.dbPath ?? (typeof opts.dbPath === "string" ? opts.dbPath : undefined),
-    dataDir: argvParsed.dataDir ?? (typeof opts.dataDir === "string" ? opts.dataDir : undefined),
     format: argvParsed.format ?? (format === "json" || format === "human" ? format : undefined),
     author: argvParsed.author ?? (typeof opts.author === "string" ? opts.author : undefined),
-    skipLegacyCheck:
-      argvParsed.skipLegacyCheck ?? (typeof opts.skipLegacyCheck === "boolean" ? opts.skipLegacyCheck : undefined),
   };
 }
 
@@ -140,35 +132,11 @@ function toErrorMessage(error: unknown): string {
   return String(error);
 }
 
-function toConflictWarning(result: unknown): Warning[] {
-  if (!result || typeof result !== "object") {
-    return [];
-  }
-
-  if (!("id" in result) || !("conflicts" in result)) {
-    return [];
-  }
-
-  const id = (result as { id?: unknown }).id;
-  const conflicts = (result as { conflicts?: unknown }).conflicts;
-
-  if (typeof id !== "string" || !Array.isArray(conflicts) || conflicts.length === 0) {
-    return [];
-  }
-
-  return [
-    {
-      code: "CONFLICT",
-      message: `Task ${id} includes ${conflicts.length} conflict marker(s).`,
-    },
-  ];
-}
-
 export function createCliRuntime(program: Command): CliRuntime {
   return {
     parseCsv,
 
-    async runCommand(commandLike, handler) {
+    async runCommand(commandLike, handler, options = {}) {
       const globalOptions = getGlobalOptions(program, commandLike);
       let format: OutputFormat = globalOptions.format ?? "human";
       let backend: DbBackend | null = null;
@@ -177,19 +145,20 @@ export function createCliRuntime(program: Command): CliRuntime {
         const config = await resolveConfig(globalOptions);
         format = config.format;
 
-        if (!config.skipLegacyCheck) {
-          const warning = await detectLegacyData(config);
-          if (warning) {
-            render({ ok: false, message: warning }, format);
-            process.exitCode = 1;
-            return;
+        backend = await createBackend(config.backend);
+        const store = new TaskStore(backend);
+        const userStore = new UserStore(backend);
+
+        let currentUser: User | null = null;
+        if (options.requireActiveUser) {
+          try {
+            currentUser = await userStore.requireActiveUser(config.author);
+          } catch {
+            throw new KaryaError("No user configured. Run `karya setup` first.", "INVALID_STATE");
           }
         }
 
-        backend = await createBackend(config.backend);
-        const store = new TaskStore(backend);
-
-        const output = await handler({ config, store, backend });
+        const output = await handler({ config, store, userStore, backend, currentUser });
         render(output, format);
       } catch (error) {
         render(
@@ -207,11 +176,11 @@ export function createCliRuntime(program: Command): CliRuntime {
       }
     },
 
-    async runWrite(context, operation) {
+    async runWrite(_context, operation) {
       const result = await operation();
       return {
         result,
-        warnings: toConflictWarning(result),
+        warnings: [],
       };
     },
   };

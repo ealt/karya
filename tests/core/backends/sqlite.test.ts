@@ -1,31 +1,13 @@
+import Database from "better-sqlite3";
+import { mkdtemp } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { SqliteBackend } from "../../../src/core/backends/sqlite.js";
-import type { Task } from "../../../src/core/schema.js";
+import { KaryaError } from "../../../src/core/errors.js";
+import { makeRelation, makeTask, makeUser } from "../../helpers/factories.js";
 
 const backends: SqliteBackend[] = [];
-
-function task(overrides: Partial<Task> = {}): Task {
-  return {
-    schemaVersion: 1,
-    id: overrides.id ?? "abcd1234",
-    title: overrides.title ?? "Task",
-    description: overrides.description ?? "",
-    project: overrides.project ?? "inbox",
-    tags: overrides.tags ?? [],
-    priority: overrides.priority ?? "P2",
-    status: overrides.status ?? "open",
-    createdAt: overrides.createdAt ?? "2026-03-04T00:00:00.000Z",
-    updatedAt: overrides.updatedAt ?? "2026-03-04T00:00:00.000Z",
-    startedAt: overrides.startedAt ?? null,
-    completedAt: overrides.completedAt ?? null,
-    dueAt: overrides.dueAt ?? null,
-    createdBy: overrides.createdBy ?? "cli",
-    updatedBy: overrides.updatedBy ?? "cli",
-    parentId: overrides.parentId ?? null,
-    notes: overrides.notes ?? [],
-    conflicts: overrides.conflicts,
-  };
-}
 
 async function createBackend(): Promise<SqliteBackend> {
   const backend = new SqliteBackend(":memory:");
@@ -39,37 +21,82 @@ afterEach(async () => {
 });
 
 describe("SqliteBackend", () => {
-  it("supports CRUD and prefix lookup", async () => {
+  it("supports users, tasks, relations, and prefix lookup", async () => {
     const backend = await createBackend();
-    const first = task({ id: "abcd1234" });
-    const second = task({ id: "abef5678" });
+    const user = makeUser();
+    const first = makeTask({ id: "abcd1234" });
+    const second = makeTask({ id: "abef5678" });
+    const relation = makeRelation({ sourceId: first.id, targetId: second.id });
 
-    expect((await backend.putTask(first, "tasks")).written).toBe(true);
-    expect((await backend.putTask(second, "archive")).written).toBe(true);
+    await backend.users.putUser(user);
+    expect((await backend.tasks.putTask(first)).written).toBe(true);
+    expect((await backend.tasks.putTask(second)).written).toBe(true);
+    await backend.relations.putRelation(relation);
 
-    const found = await backend.getTask(first.id, "tasks");
-    expect(found?.id).toBe(first.id);
+    expect((await backend.users.getUserByAlias(user.alias))?.id).toBe(user.id);
+    expect((await backend.tasks.getTask(first.id))?.id).toBe(first.id);
+    expect((await backend.tasks.findByPrefix("abc")).map((item) => item.id)).toEqual(["abcd1234"]);
+    expect(await backend.relations.getRelationsForTask(first.id)).toContainEqual(relation);
+  });
 
-    const prefix = await backend.findByPrefix("abc", "tasks");
-    expect(prefix.map((item) => item.id)).toEqual(["abcd1234"]);
+  it("enforces foreign keys for created_by", async () => {
+    const backend = await createBackend();
 
-    await backend.moveTask(first, "tasks", "archive");
-    expect(await backend.getTask(first.id, "tasks")).toBeNull();
-    expect(await backend.getTask(first.id, "archive")).not.toBeNull();
-
-    await backend.deleteTask(first.id, "archive");
-    expect(await backend.getTask(first.id, "archive")).toBeNull();
+    await expect(backend.tasks.putTask(makeTask())).rejects.toBeInstanceOf(KaryaError);
   });
 
   it("returns written=false when row is newer", async () => {
     const backend = await createBackend();
-    const newer = task({ id: "zxyw9876", updatedAt: "2026-03-04T11:00:00.000Z" });
-    const older = task({ id: "zxyw9876", updatedAt: "2026-03-04T10:00:00.000Z" });
+    const user = makeUser();
+    await backend.users.putUser(user);
 
-    expect((await backend.putTask(newer, "tasks")).written).toBe(true);
-    expect((await backend.putTask(older, "tasks")).written).toBe(false);
+    const newer = makeTask({ id: "zxyw9876", updatedAt: "2026-03-25T11:00:00.000Z" });
+    const older = makeTask({ id: "zxyw9876", updatedAt: "2026-03-25T10:00:00.000Z" });
 
-    const saved = await backend.getTask("zxyw9876", "tasks");
-    expect(saved?.updatedAt).toBe("2026-03-04T11:00:00.000Z");
+    expect((await backend.tasks.putTask(newer)).written).toBe(true);
+    expect((await backend.tasks.putTask(older)).written).toBe(false);
+    expect((await backend.tasks.getTask("zxyw9876"))?.updatedAt).toBe("2026-03-25T11:00:00.000Z");
+  });
+
+  it("rejects v0 schema databases", async () => {
+    const root = await mkdtemp(join(tmpdir(), "karya-sqlite-legacy-"));
+    const dbPath = join(root, "legacy.db");
+    const handle = new Database(dbPath);
+    handle.exec(`
+      CREATE TABLE tasks (
+        id TEXT PRIMARY KEY,
+        bucket TEXT NOT NULL,
+        data TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      );
+    `);
+    handle.close();
+
+    const legacy = new SqliteBackend(dbPath);
+    backends.push(legacy);
+
+    await expect(legacy.initialize()).rejects.toThrow("Database uses v0 schema");
+  });
+
+  it("enforces single-parent and self-reference constraints", async () => {
+    const backend = await createBackend();
+    const user = makeUser();
+    const parentA = makeTask({ id: "parenta1" });
+    const parentB = makeTask({ id: "parentb1" });
+    const child = makeTask({ id: "child001" });
+
+    await backend.users.putUser(user);
+    await backend.tasks.putTask(parentA);
+    await backend.tasks.putTask(parentB);
+    await backend.tasks.putTask(child);
+
+    await backend.relations.putRelation(makeRelation({ sourceId: child.id, targetId: parentA.id, type: "parent" }));
+    await expect(
+      backend.relations.putRelation(makeRelation({ sourceId: child.id, targetId: parentB.id, type: "parent" })),
+    ).rejects.toBeInstanceOf(KaryaError);
+    await expect(
+      backend.relations.putRelation(makeRelation({ sourceId: child.id, targetId: child.id, type: "blocks" })),
+    ).rejects.toBeInstanceOf(KaryaError);
   });
 });

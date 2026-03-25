@@ -1,39 +1,29 @@
 import { describe, expect, it } from "vitest";
 import { filterTasks } from "../../src/core/query.js";
-import type { Task } from "../../src/core/schema.js";
-
-function makeTask(overrides: Partial<Task>): Task {
-  return {
-    schemaVersion: 1,
-    id: overrides.id ?? "abcd1234",
-    title: overrides.title ?? "Task",
-    description: overrides.description ?? "",
-    project: overrides.project ?? "inbox",
-    tags: overrides.tags ?? [],
-    priority: overrides.priority ?? "P2",
-    status: overrides.status ?? "open",
-    createdAt: overrides.createdAt ?? "2026-03-04T00:00:00.000Z",
-    updatedAt: overrides.updatedAt ?? "2026-03-04T00:00:00.000Z",
-    startedAt: overrides.startedAt ?? null,
-    completedAt: overrides.completedAt ?? null,
-    dueAt: overrides.dueAt ?? null,
-    createdBy: overrides.createdBy ?? "cli",
-    updatedBy: overrides.updatedBy ?? "cli",
-    parentId: overrides.parentId ?? null,
-    notes: overrides.notes ?? [],
-    conflicts: overrides.conflicts,
-  };
-}
+import { makeTask, makeUser } from "../helpers/factories.js";
 
 describe("filterTasks", () => {
-  it("filters by project and status", () => {
+  it("filters by owner, assignee, and assignee type", () => {
+    const agent = makeUser({ id: "agent001", alias: "agent", type: "agent" });
+    const human = makeUser({ id: "human001", alias: "human", type: "human" });
     const tasks = [
-      makeTask({ id: "aaaabbbb", project: "alpha", status: "open" }),
-      makeTask({ id: "ccccdddd", project: "beta", status: "done" }),
+      makeTask({ id: "task0001", ownerId: human.id, assigneeId: agent.id, tags: ["cli"] }),
+      makeTask({ id: "task0002", ownerId: agent.id, assigneeId: human.id }),
     ];
+    const users = new Map([
+      [agent.id, agent],
+      [human.id, human],
+    ]);
 
-    const filtered = filterTasks(tasks, { project: ["alpha"], status: ["open"] });
-    expect(filtered).toHaveLength(1);
-    expect(filtered[0].id).toBe("aaaabbbb");
+    const filtered = filterTasks(
+      tasks,
+      {
+        ownerId: human.id,
+        assigneeType: "agent",
+      },
+      (id) => users.get(id) ?? null,
+    );
+
+    expect(filtered.map((task) => task.id)).toEqual(["task0001"]);
   });
 });

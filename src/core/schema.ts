@@ -1,46 +1,40 @@
 import { z } from "zod";
-import {
-  DEFAULT_BACKEND_TYPE,
-  DEFAULT_PRIORITY,
-  DEFAULT_PROJECT,
-  DEFAULT_SCHEMA_VERSION,
-} from "../shared/constants.js";
+import { DEFAULT_BACKEND_TYPE, DEFAULT_PRIORITY, DEFAULT_PROJECT } from "../shared/constants.js";
 
+export const UserTypeSchema = z.enum(["human", "agent"]);
 export const PrioritySchema = z.enum(["P0", "P1", "P2", "P3"]);
 export const StatusSchema = z.enum(["open", "in_progress", "done", "cancelled"]);
+export const RelationTypeSchema = z.enum(["parent", "blocks"]);
 
-export const TaskNoteSchema = z.object({
-  body: z.string().min(1),
-  author: z.string().min(1),
-  timestamp: z.string().datetime(),
-});
-
-export const TaskConflictSchema = z.object({
-  field: z.string().min(1),
-  localValue: z.unknown(),
-  remoteValue: z.unknown(),
-  timestamp: z.string().datetime(),
+export const UserSchema = z.object({
+  id: z.string().length(8),
+  name: z.string().min(1),
+  alias: z.string().min(1),
+  type: UserTypeSchema.default("human"),
+  createdAt: z.string().datetime(),
+  deactivatedAt: z.string().datetime().nullable().default(null),
 });
 
 export const TaskSchema = z.object({
-  schemaVersion: z.number().int().positive().default(DEFAULT_SCHEMA_VERSION),
-  id: z.string().min(8).max(8),
+  id: z.string().length(8),
   title: z.string().min(1),
-  description: z.string().default(""),
   project: z.string().min(1).default(DEFAULT_PROJECT),
-  tags: z.array(z.string()).default([]),
   priority: PrioritySchema.default(DEFAULT_PRIORITY),
   status: StatusSchema.default("open"),
+  note: z.string().nullable().default(null),
+  ownerId: z.string().length(8).nullable().default(null),
+  assigneeId: z.string().length(8).nullable().default(null),
+  createdBy: z.string().length(8),
+  updatedBy: z.string().length(8),
+  tags: z.array(z.string()).default([]),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
-  startedAt: z.string().datetime().nullable().default(null),
-  completedAt: z.string().datetime().nullable().default(null),
-  dueAt: z.string().datetime().nullable().default(null),
-  createdBy: z.string().min(1),
-  updatedBy: z.string().min(1),
-  parentId: z.string().nullable().default(null),
-  notes: z.array(TaskNoteSchema).default([]),
-  conflicts: z.array(TaskConflictSchema).optional(),
+});
+
+export const TaskRelationSchema = z.object({
+  sourceId: z.string().length(8),
+  targetId: z.string().length(8),
+  type: RelationTypeSchema,
 });
 
 export const BackendConfigSchema = z.discriminatedUnion("type", [
@@ -56,11 +50,14 @@ export const BackendConfigSchema = z.discriminatedUnion("type", [
   }),
 ]);
 
-export const AppConfigSchema = z.object({
-  backend: BackendConfigSchema.optional(),
-  defaultProject: z.string().min(1).default(DEFAULT_PROJECT),
-  defaultPriority: PrioritySchema.default(DEFAULT_PRIORITY),
-  author: z.string().min(1).default("cli"),
+export const FilterAliasValueSchema = z.object({
+  project: z.string().optional(),
+  priority: PrioritySchema.optional(),
+  status: StatusSchema.optional(),
+  tag: z.string().optional(),
+  owner: z.string().optional(),
+  assignee: z.string().optional(),
+  assigneeType: UserTypeSchema.optional(),
 });
 
 export const ListFiltersSchema = z.object({
@@ -68,14 +65,28 @@ export const ListFiltersSchema = z.object({
   priority: z.array(PrioritySchema).optional(),
   status: z.array(StatusSchema).optional(),
   tag: z.array(z.string()).optional(),
-  includeArchive: z.boolean().optional(),
+  ownerId: z.string().nullable().optional(),
+  assigneeId: z.string().nullable().optional(),
+  assigneeType: UserTypeSchema.optional(),
 });
 
+export const AppConfigSchema = z.object({
+  backend: BackendConfigSchema.optional(),
+  defaultProject: z.string().min(1).default(DEFAULT_PROJECT),
+  defaultPriority: PrioritySchema.default(DEFAULT_PRIORITY),
+  author: z.string().min(1).default("cli"),
+  autoTags: z.array(z.string()).default([]),
+  filterAliases: z.record(z.string(), FilterAliasValueSchema).default({}),
+});
+
+export type UserType = z.infer<typeof UserTypeSchema>;
+export type User = z.infer<typeof UserSchema>;
 export type Priority = z.infer<typeof PrioritySchema>;
 export type TaskStatus = z.infer<typeof StatusSchema>;
-export type TaskNote = z.infer<typeof TaskNoteSchema>;
-export type TaskConflict = z.infer<typeof TaskConflictSchema>;
+export type RelationType = z.infer<typeof RelationTypeSchema>;
 export type Task = z.infer<typeof TaskSchema>;
+export type TaskRelation = z.infer<typeof TaskRelationSchema>;
 export type BackendConfig = z.infer<typeof BackendConfigSchema>;
-export type AppConfig = z.infer<typeof AppConfigSchema>;
+export type FilterAliasValue = z.infer<typeof FilterAliasValueSchema>;
 export type ListFilters = z.infer<typeof ListFiltersSchema>;
+export type AppConfig = z.infer<typeof AppConfigSchema>;

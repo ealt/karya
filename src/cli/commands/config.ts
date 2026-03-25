@@ -14,6 +14,8 @@ export function registerConfigCommand(program: Command, runtime: CliRuntime): vo
         await saveAppConfig({
           backend: context.config.backend,
           author: context.config.author,
+          autoTags: context.config.autoTags,
+          filterAliases: context.config.filterAliases,
         });
 
         return {
