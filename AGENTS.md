@@ -48,7 +48,6 @@ src/
     user-store.ts      # User CRUD + active-user resolution
     config.ts          # Config load/save/resolution + env parsing
     query.ts           # Filter + sort tasks
-    reconcile.ts       # Field-level merge for write conflicts
     dates.ts           # ISO timestamps
     errors.ts          # KaryaError with typed error codes
     id.ts              # 8-char nanoid generation
@@ -69,8 +68,9 @@ tests/
 ### Data model
 
 Karya uses normalized SQL tables: `users`, `tasks`, and `task_relations`.
-Tasks stay in the main table regardless of terminal state; `status` replaces
-archive buckets. `tasks.note` stores a single optional inline string or URI.
+Tasks stay in the main table regardless of terminal state; `closedAt` indicates
+whether a task is closed. `tasks.note` stores a single optional inline string
+or URI.
 
 ### Config resolution order
 
@@ -97,7 +97,7 @@ Relevant env vars:
 
 - Zod schemas in `src/core/schema.ts` are the type source of truth
 - Partial ID matching requires at least 4 characters
-- Writes are optimistic (`putTask` checks `updated_at`)
+- Task writes are last-write-wins; there is no optimistic conflict detection
 - Backend initialization enforces schema version via `karya_meta`
 - App config writes attempt POSIX `0600` permissions (best-effort)
 
@@ -106,5 +106,4 @@ Relevant env vars:
 - All imports use `.js` extensions (NodeNext)
 - `bun run test` uses Vitest (not Bun's built-in test runner)
 - `KaryaError` codes: `VALIDATION`, `NOT_FOUND`, `INVALID_ID`,
-  `AMBIGUOUS_ID`, `INVALID_STATE`, `WRITE_CONFLICT`, `CONFIG`,
-  `SCHEMA_MISMATCH`, `USAGE`
+  `AMBIGUOUS_ID`, `INVALID_STATE`, `CONFIG`, `SCHEMA_MISMATCH`, `USAGE`

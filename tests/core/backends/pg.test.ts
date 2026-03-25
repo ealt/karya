@@ -30,7 +30,7 @@ describePg("PgBackend", () => {
       alias: `u${Math.random().toString(36).slice(2, 8)}`,
     });
     const id = `pg${Math.random().toString(36).slice(2, 8)}`.slice(0, 8);
-    const created = makeTask({ id, createdBy: user.id, updatedBy: user.id });
+    const created = makeTask({ id });
 
     await backend.users.putUser(user);
     expect((await backend.tasks.putTask(created)).written).toBe(true);

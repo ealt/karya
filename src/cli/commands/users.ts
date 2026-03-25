@@ -69,8 +69,7 @@ export function registerUsersCommand(program: Command, runtime: CliRuntime): voi
             message: `Updated user ${user.alias}`,
             data: user,
           };
-        },
-        { requireActiveUser: true },
+        }
       );
     });
 
@@ -88,8 +87,7 @@ export function registerUsersCommand(program: Command, runtime: CliRuntime): voi
             message: `Deactivated user ${user.alias}`,
             data: user,
           };
-        },
-        { requireActiveUser: true },
+        }
       );
     });
 }

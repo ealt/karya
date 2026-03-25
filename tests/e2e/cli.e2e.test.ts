@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { mkdtemp, mkdir } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, readdir } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
@@ -56,7 +56,7 @@ describe("CLI e2e", () => {
   });
 
   it(
-    "handles setup -> add -> edit status -> list workflow",
+    "handles setup -> add -> close -> list workflow",
     async () => {
       const root = await mkdtemp(join(tmpdir(), "karya-e2e-"));
       const dbPath = join(root, "karya.db");
@@ -77,17 +77,44 @@ describe("CLI e2e", () => {
       const addJson = JSON.parse(addOut.stdout) as { data: { id: string } };
       const taskId = addJson.data.id;
 
-      expect((await runCli(["--db-path", dbPath, "edit", taskId, "--status", "done"], homeDir)).code).toBe(0);
+      expect((await runCli(["--db-path", dbPath, "edit", taskId, "--close"], homeDir)).code).toBe(0);
 
-      const listOut = await runCli(["--db-path", dbPath, "--format", "json", "list", "--status", "done"], homeDir);
+      const listOut = await runCli(["--db-path", dbPath, "--format", "json", "list", "--closed"], homeDir);
       expect(listOut.code).toBe(0);
-      const listJson = JSON.parse(listOut.stdout) as { data: Array<{ id: string; status: string }> };
+      const listJson = JSON.parse(listOut.stdout) as { data: Array<{ id: string; closedAt: string | null }> };
       expect(listJson.data.map((task) => task.id)).toContain(taskId);
 
       const showOut = await runCli(["--db-path", dbPath, "--format", "json", "show", taskId.slice(0, 4)], homeDir);
       const showJson = JSON.parse(showOut.stdout) as { data: { task: { id: string; note: string | null } } };
       expect(showJson.data.task.id).toBe(taskId);
       expect(showJson.data.task.note).toBe("initial");
+    },
+    20000,
+  );
+
+  it(
+    "supports list --all and rejects edit --status",
+    async () => {
+      const root = await mkdtemp(join(tmpdir(), "karya-e2e-list-all-"));
+      const dbPath = join(root, "karya.db");
+      const homeDir = join(root, "home");
+      await mkdir(homeDir, { recursive: true });
+
+      const openAdd = await runCli(["--db-path", dbPath, "--format", "json", "add", "Open task"], homeDir);
+      const closedAdd = await runCli(["--db-path", dbPath, "--format", "json", "add", "Closed task"], homeDir);
+      const openId = (JSON.parse(openAdd.stdout) as { data: { id: string } }).data.id;
+      const closedId = (JSON.parse(closedAdd.stdout) as { data: { id: string } }).data.id;
+
+      expect((await runCli(["--db-path", dbPath, "edit", closedId, "--close"], homeDir)).code).toBe(0);
+
+      const allOut = await runCli(["--db-path", dbPath, "--format", "json", "list", "--all"], homeDir);
+      expect(allOut.code).toBe(0);
+      const allJson = JSON.parse(allOut.stdout) as { data: Array<{ id: string }> };
+      expect(allJson.data.map((task) => task.id)).toEqual(expect.arrayContaining([openId, closedId]));
+
+      const statusOut = await runCli(["--db-path", dbPath, "edit", openId, "--status", "done"], homeDir);
+      expect(statusOut.code).toBe(1);
+      expect(`${statusOut.stdout}\n${statusOut.stderr}`).toContain("unknown option '--status'");
     },
     20000,
   );
@@ -114,7 +141,6 @@ describe("CLI e2e", () => {
 
       await runCli(["--db-path", dbPath, "config", "init"], homeDir);
       await runCli(["--db-path", dbPath, "users", "add", "--name", "Eric Alt", "--alias", "ealt"], homeDir);
-      await runCli(["--db-path", dbPath, "config", "set", "author", "ealt"], homeDir);
       const addAgent = await runCli(
         ["--db-path", dbPath, "users", "add", "--name", "fraxl", "--alias", "fraxl", "--type", "agent"],
         homeDir,
@@ -131,14 +157,54 @@ describe("CLI e2e", () => {
     20000,
   );
 
-  it("fails mutating commands without setup", async () => {
-    const root = await mkdtemp(join(tmpdir(), "karya-e2e-nosetup-"));
+  it("allows task creation without setup", async () => {
+    const root = await mkdtemp(join(tmpdir(), "karya-e2e-no-setup-"));
     const dbPath = join(root, "karya.db");
     const homeDir = join(root, "home");
     await mkdir(homeDir, { recursive: true });
 
-    const result = await runCli(["--db-path", dbPath, "add", "Ship MVP"], homeDir);
-    expect(result.code).toBe(1);
-    expect(result.stdout).toContain("No user configured. Run `karya setup` first.");
+    const result = await runCli(["--db-path", dbPath, "--format", "json", "add", "Ship MVP"], homeDir);
+    expect(result.code).toBe(0);
+    const payload = JSON.parse(result.stdout) as { data: { title: string; ownerId: string | null } };
+    expect(payload.data.title).toBe("Ship MVP");
+    expect(payload.data.ownerId).toBeNull();
   });
+
+  it(
+    "exports and imports the v2 task shape",
+    async () => {
+      const root = await mkdtemp(join(tmpdir(), "karya-e2e-export-import-"));
+      const sourceDbPath = join(root, "source.db");
+      const targetDbPath = join(root, "target.db");
+      const exportDir = join(root, "export");
+      const homeDir = join(root, "home");
+      await mkdir(homeDir, { recursive: true });
+
+      const addOut = await runCli(["--db-path", sourceDbPath, "--format", "json", "add", "Round trip"], homeDir);
+      const taskId = (JSON.parse(addOut.stdout) as { data: { id: string } }).data.id;
+      expect((await runCli(["--db-path", sourceDbPath, "edit", taskId, "--close"], homeDir)).code).toBe(0);
+
+      const exportOut = await runCli(["--db-path", sourceDbPath, "export", "--output", exportDir], homeDir);
+      expect(exportOut.code).toBe(0);
+
+      const taskFiles = (await readdir(join(exportDir, "tasks"))).filter((name) => name.endsWith(".json"));
+      expect(taskFiles).toHaveLength(1);
+      const exportedTask = JSON.parse(await readFile(join(exportDir, "tasks", taskFiles[0]), "utf8")) as Record<string, unknown>;
+      expect(exportedTask.openedAt).toEqual(expect.any(String));
+      expect(exportedTask.closedAt).toEqual(expect.any(String));
+      expect("status" in exportedTask).toBe(false);
+
+      const importOut = await runCli(["--db-path", targetDbPath, "import", "--input", exportDir], homeDir);
+      expect(importOut.code).toBe(0);
+
+      const listOut = await runCli(["--db-path", targetDbPath, "--format", "json", "list", "--closed"], homeDir);
+      expect(listOut.code).toBe(0);
+      const listed = JSON.parse(listOut.stdout) as { data: Array<{ id: string; openedAt: string; closedAt: string | null }> };
+      expect(listed.data.map((task) => task.id)).toContain(taskId);
+      const importedTask = listed.data.find((task) => task.id === taskId);
+      expect(importedTask?.openedAt).toEqual(expect.any(String));
+      expect(importedTask?.closedAt).toEqual(expect.any(String));
+    },
+    20000,
+  );
 });

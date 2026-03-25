@@ -39,23 +39,23 @@ describe("SqliteBackend", () => {
     expect(await backend.relations.getRelationsForTask(first.id)).toContainEqual(relation);
   });
 
-  it("enforces foreign keys for created_by", async () => {
+  it("enforces foreign keys for owner_id", async () => {
     const backend = await createBackend();
 
-    await expect(backend.tasks.putTask(makeTask())).rejects.toBeInstanceOf(KaryaError);
+    await expect(backend.tasks.putTask(makeTask({ ownerId: "missing1" }))).rejects.toBeInstanceOf(KaryaError);
   });
 
-  it("returns written=false when row is newer", async () => {
+  it("uses last-write-wins updates", async () => {
     const backend = await createBackend();
     const user = makeUser();
     await backend.users.putUser(user);
 
-    const newer = makeTask({ id: "zxyw9876", updatedAt: "2026-03-25T11:00:00.000Z" });
-    const older = makeTask({ id: "zxyw9876", updatedAt: "2026-03-25T10:00:00.000Z" });
+    const first = makeTask({ id: "zxyw9876", note: "first", openedAt: "2026-03-25T10:00:00.000Z" });
+    const second = makeTask({ id: "zxyw9876", note: "second", openedAt: "2026-03-25T10:00:00.000Z" });
 
-    expect((await backend.tasks.putTask(newer)).written).toBe(true);
-    expect((await backend.tasks.putTask(older)).written).toBe(false);
-    expect((await backend.tasks.getTask("zxyw9876"))?.updatedAt).toBe("2026-03-25T11:00:00.000Z");
+    expect((await backend.tasks.putTask(first)).written).toBe(true);
+    expect((await backend.tasks.putTask(second)).written).toBe(true);
+    expect((await backend.tasks.getTask("zxyw9876"))?.note).toBe("second");
   });
 
   it("rejects v0 schema databases", async () => {
@@ -77,6 +77,25 @@ describe("SqliteBackend", () => {
     backends.push(legacy);
 
     await expect(legacy.initialize()).rejects.toThrow("Database uses v0 schema");
+  });
+
+  it("rejects schema versions not equal to 3", async () => {
+    const root = await mkdtemp(join(tmpdir(), "karya-sqlite-version-"));
+    const dbPath = join(root, "wrong-version.db");
+    const handle = new Database(dbPath);
+    handle.exec(`
+      CREATE TABLE karya_meta (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+      );
+      INSERT INTO karya_meta (key, value) VALUES ('schema_version', '2');
+    `);
+    handle.close();
+
+    const legacy = new SqliteBackend(dbPath);
+    backends.push(legacy);
+
+    await expect(legacy.initialize()).rejects.toThrow("Unsupported schema version: 2. Expected 3.");
   });
 
   it("enforces single-parent and self-reference constraints", async () => {

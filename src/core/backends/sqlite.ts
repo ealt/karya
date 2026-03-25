@@ -22,15 +22,12 @@ interface TaskRow {
   title: string;
   project: string;
   priority: string;
-  status: string;
   note: string | null;
   owner_id: string | null;
   assignee_id: string | null;
-  created_by: string;
-  updated_by: string;
   tags: string;
-  created_at: string;
-  updated_at: string;
+  opened_at: string;
+  closed_at: string | null;
 }
 
 interface RelationRow {
@@ -56,15 +53,12 @@ function parseTaskRow(row: TaskRow): Task {
     title: row.title,
     project: row.project,
     priority: row.priority,
-    status: row.status,
     note: row.note,
     ownerId: row.owner_id,
     assigneeId: row.assignee_id,
-    createdBy: row.created_by,
-    updatedBy: row.updated_by,
     tags: JSON.parse(row.tags) as string[],
-    createdAt: row.created_at,
-    updatedAt: row.updated_at,
+    openedAt: row.opened_at,
+    closedAt: row.closed_at,
   });
 }
 
@@ -150,7 +144,7 @@ export class SqliteBackend implements DbBackend {
         return row ? parseTaskRow(row) : null;
       },
       getAllTasks: async () => {
-        const rows = this.db.prepare("SELECT * FROM tasks ORDER BY updated_at DESC").all() as TaskRow[];
+        const rows = this.db.prepare("SELECT * FROM tasks ORDER BY COALESCE(closed_at, opened_at) DESC, id").all() as TaskRow[];
         return rows.map(parseTaskRow);
       },
       findByPrefix: async (prefix) => {
@@ -164,24 +158,19 @@ export class SqliteBackend implements DbBackend {
             .prepare(
               `
                 INSERT INTO tasks (
-                  id, title, project, priority, status, note, owner_id, assignee_id,
-                  created_by, updated_by, tags, created_at, updated_at
+                  id, title, project, priority, note, owner_id, assignee_id, tags, opened_at, closed_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                   title = excluded.title,
                   project = excluded.project,
                   priority = excluded.priority,
-                  status = excluded.status,
                   note = excluded.note,
                   owner_id = excluded.owner_id,
                   assignee_id = excluded.assignee_id,
-                  created_by = excluded.created_by,
-                  updated_by = excluded.updated_by,
                   tags = excluded.tags,
-                  created_at = excluded.created_at,
-                  updated_at = excluded.updated_at
-                WHERE tasks.updated_at <= excluded.updated_at
+                  opened_at = excluded.opened_at,
+                  closed_at = excluded.closed_at
               `,
             )
             .run(
@@ -189,15 +178,12 @@ export class SqliteBackend implements DbBackend {
               validated.title,
               validated.project,
               validated.priority,
-              validated.status,
               validated.note,
               validated.ownerId,
               validated.assigneeId,
-              validated.createdBy,
-              validated.updatedBy,
               JSON.stringify(validated.tags),
-              validated.createdAt,
-              validated.updatedAt,
+              validated.openedAt,
+              validated.closedAt,
             );
           return { written: result.changes > 0 } satisfies WriteResult;
         } catch (error) {
@@ -253,11 +239,11 @@ export class SqliteBackend implements DbBackend {
       if (tableNames.has("tasks")) {
         const columns = this.db.prepare("PRAGMA table_info(tasks)").all() as Array<{ name: string }>;
         if (columns.some((column) => column.name === "bucket")) {
-          throw new KaryaError("Database uses v0 schema. Please use a fresh database for v1.", "SCHEMA_MISMATCH");
+          throw new KaryaError("Database uses v0 schema. Please use a fresh database for v2.", "SCHEMA_MISMATCH");
         }
       }
 
-      throw new KaryaError("Database schema is missing karya_meta. Please use a fresh database for v1.", "SCHEMA_MISMATCH");
+      throw new KaryaError("Database schema is missing karya_meta. Please use a fresh database for v2.", "SCHEMA_MISMATCH");
     }
 
     const versionRow = this.db.prepare("SELECT value FROM karya_meta WHERE key = 'schema_version'").get() as MetaRow | undefined;
@@ -298,15 +284,12 @@ export class SqliteBackend implements DbBackend {
         title TEXT NOT NULL,
         project TEXT NOT NULL DEFAULT 'inbox',
         priority TEXT NOT NULL DEFAULT 'P2' CHECK(priority IN ('P0','P1','P2','P3')),
-        status TEXT NOT NULL DEFAULT 'open' CHECK(status IN ('open','in_progress','done','cancelled')),
         note TEXT,
         owner_id TEXT REFERENCES users(id),
         assignee_id TEXT REFERENCES users(id),
-        created_by TEXT NOT NULL REFERENCES users(id),
-        updated_by TEXT NOT NULL REFERENCES users(id),
         tags TEXT NOT NULL DEFAULT '[]',
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL
+        opened_at TEXT NOT NULL,
+        closed_at TEXT
       );
 
       CREATE TABLE IF NOT EXISTS task_relations (

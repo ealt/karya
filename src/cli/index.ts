@@ -31,7 +31,7 @@ program
   .version(version)
   .option("--db-path <path>", "Override SQLite database path")
   .option("--format <format>", "Output format: human|json")
-  .option("--author <author>", "Author alias for updates")
+  .option("--author <author>", "Alias used for 'me' resolution and defaults")
   .showHelpAfterError();
 
 registerCommands(program, createCliRuntime(program));

@@ -1,5 +1,5 @@
 import { Command } from "commander";
-import type { Priority, TaskStatus } from "../../core/schema.js";
+import type { Priority } from "../../core/schema.js";
 import { KaryaError } from "../../core/errors.js";
 import { formatTaskLine } from "../formatters/output.js";
 import { expandFilterAlias } from "../shared/aliases.js";
@@ -26,35 +26,42 @@ export function registerListCommand(program: Command, runtime: CliRuntime): void
     .argument("[filterAlias]", "Configured filter alias")
     .option("-p, --project <projects>", "Comma-separated projects")
     .option("-P, --priority <priorities>", "Comma-separated priorities")
-    .option("-s, --status <statuses>", "Comma-separated statuses")
     .option("-t, --tag <tags>", "Comma-separated tags")
+    .option("--closed", "Show only closed tasks")
+    .option("--all", "Show open and closed tasks")
     .option("--owner <alias>", "Owner alias, 'me', or 'none'")
     .option("--assignee <alias>", "Assignee alias, 'me', or 'none'")
-    .action(async (filterAlias: string | undefined, options: Record<string, string | undefined>, command: Command) => {
+    .action(
+      async (filterAlias: string | undefined, options: Record<string, string | boolean | undefined>, command: Command) => {
       await runtime.runCommand(command, async (context) => {
         const aliasConfig = filterAlias ? context.config.filterAliases[filterAlias] : undefined;
         if (filterAlias && !aliasConfig) {
           throw new KaryaError(`Unknown filter alias: ${filterAlias}`, "USAGE");
         }
+        if (options.closed === true && options.all === true) {
+          throw new KaryaError("Cannot combine --closed with --all.", "USAGE");
+        }
 
         const expanded = aliasConfig ? expandFilterAlias(aliasConfig, context.config.author) : {};
-        const project = runtime.parseCsv(options.project) ?? expanded.project;
-        const priority = (runtime.parseCsv(options.priority) as Priority[] | undefined) ?? expanded.priority;
-        const status = (runtime.parseCsv(options.status) as TaskStatus[] | undefined) ?? expanded.status;
-        const tag = runtime.parseCsv(options.tag) ?? expanded.tag;
-        const ownerRef = options.owner ?? expanded.owner;
-        const assigneeRef = options.assignee ?? expanded.assignee;
+        const project = runtime.parseCsv(typeof options.project === "string" ? options.project : undefined) ?? expanded.project;
+        const priority =
+          (runtime.parseCsv(typeof options.priority === "string" ? options.priority : undefined) as Priority[] | undefined) ??
+          expanded.priority;
+        const tag = runtime.parseCsv(typeof options.tag === "string" ? options.tag : undefined) ?? expanded.tag;
+        const ownerRef = typeof options.owner === "string" ? options.owner : expanded.owner;
+        const assigneeRef = typeof options.assignee === "string" ? options.assignee : expanded.assignee;
         const ownerId = await resolveFilterUserId(context, ownerRef);
         const assigneeId = await resolveFilterUserId(context, assigneeRef);
+        const view = options.all === true ? "all" : options.closed === true ? "closed" : "open";
 
         const tasks = await context.store.listTasks({
           project,
           priority,
-          status,
           tag,
           ownerId,
           assigneeId,
           assigneeType: expanded.assigneeType,
+          view,
         });
 
         if (context.config.format === "json") {

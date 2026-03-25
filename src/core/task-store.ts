@@ -3,8 +3,7 @@ import type { DbBackend } from "./backend.js";
 import { nowIso } from "./dates.js";
 import { KaryaError } from "./errors.js";
 import { createId } from "./id.js";
-import { filterTasks } from "./query.js";
-import { reconcileTasks } from "./reconcile.js";
+import { filterTasks, type TaskListView } from "./query.js";
 import {
   ListFiltersSchema,
   TaskRelationSchema,
@@ -13,7 +12,6 @@ import {
   type RelationType,
   type Task,
   type TaskRelation,
-  type TaskStatus,
 } from "./schema.js";
 
 export interface AddTaskInput {
@@ -31,10 +29,11 @@ export interface EditTaskInput {
   title?: string;
   project?: string;
   priority?: Priority;
-  status?: TaskStatus;
   note?: string | null;
   ownerId?: string | null;
   assigneeId?: string | null;
+  close?: boolean;
+  reopen?: boolean;
   tags?: string[];
   addTags?: string[];
   rmTags?: string[];
@@ -54,11 +53,11 @@ export interface TaskDetail {
 export interface ListTaskOptions {
   project?: string[];
   priority?: Priority[];
-  status?: TaskStatus[];
   tag?: string[];
   ownerId?: string | null;
   assigneeId?: string | null;
   assigneeType?: "human" | "agent";
+  view?: TaskListView;
 }
 
 export class TaskStore {
@@ -74,9 +73,8 @@ export class TaskStore {
     await this.initializePromise;
   }
 
-  async addTask(input: AddTaskInput, createdBy: string, defaults: { project: string; priority: Priority }): Promise<Task> {
+  async addTask(input: AddTaskInput, defaults: { project: string; priority: Priority }): Promise<Task> {
     await this.ensureInitialized();
-    await this.requireActiveUserId(createdBy);
     await this.requireAssignableUserId(input.ownerId);
     await this.requireAssignableUserId(input.assigneeId);
 
@@ -89,11 +87,9 @@ export class TaskStore {
       note: input.note ?? null,
       ownerId: input.ownerId ?? null,
       assigneeId: input.assigneeId ?? null,
-      createdBy,
-      updatedBy: createdBy,
       tags: input.tags ?? [],
-      createdAt: now,
-      updatedAt: now,
+      openedAt: now,
+      closedAt: null,
     });
 
     const written = await this.writeTask(task);
@@ -106,9 +102,10 @@ export class TaskStore {
   async listTasks(options: ListTaskOptions = {}): Promise<Task[]> {
     await this.ensureInitialized();
     const [tasks, users] = await Promise.all([this.backend.tasks.getAllTasks(), this.backend.users.getAllUsers()]);
-    const filters = ListFiltersSchema.parse(options);
+    const { view = "open", ...rawFilters } = options;
+    const filters = ListFiltersSchema.parse(rawFilters);
     const userMap = new Map(users.map((user) => [user.id, user]));
-    return filterTasks(tasks, filters, (id) => userMap.get(id) ?? null);
+    return filterTasks(tasks, filters, (id) => userMap.get(id) ?? null, view);
   }
 
   async showTask(idOrPrefix: string): Promise<TaskDetail> {
@@ -121,9 +118,8 @@ export class TaskStore {
     };
   }
 
-  async editTask(idOrPrefix: string, updates: EditTaskInput, updatedBy: string): Promise<Task> {
+  async editTask(idOrPrefix: string, updates: EditTaskInput): Promise<Task> {
     await this.ensureInitialized();
-    await this.requireActiveUserId(updatedBy);
 
     const ref = await this.resolveTaskReference(idOrPrefix);
     const nextOwnerId = updates.ownerId === undefined ? ref.task.ownerId : updates.ownerId;
@@ -151,18 +147,23 @@ export class TaskStore {
       }
     }
 
+    let closedAt = ref.task.closedAt;
+    if (updates.reopen) {
+      closedAt = null;
+    } else if (updates.close && closedAt === null) {
+      closedAt = nowIso();
+    }
+
     const next = TaskSchema.parse({
       ...ref.task,
       title: updates.title ?? ref.task.title,
       project: updates.project ?? ref.task.project,
       priority: updates.priority ?? ref.task.priority,
-      status: updates.status ?? ref.task.status,
       note: updates.note === undefined ? ref.task.note : updates.note,
       ownerId: nextOwnerId ?? null,
       assigneeId: nextAssigneeId ?? null,
       tags,
-      updatedAt: nowIso(),
-      updatedBy,
+      closedAt,
     });
 
     return this.writeTask(next);
@@ -234,19 +235,15 @@ export class TaskStore {
     };
   }
 
-  private async requireActiveUserId(id: string): Promise<void> {
-    const user = await this.backend.users.getUser(id);
-    if (!user || user.deactivatedAt) {
-      throw new KaryaError(`User not found or inactive: ${id}`, "INVALID_STATE");
-    }
-  }
-
   private async requireAssignableUserId(id: string | undefined): Promise<void> {
     if (!id) {
       return;
     }
 
-    await this.requireActiveUserId(id);
+    const user = await this.backend.users.getUser(id);
+    if (!user || user.deactivatedAt) {
+      throw new KaryaError(`User not found or inactive: ${id}`, "INVALID_STATE");
+    }
   }
 
   private async assertNoParentCycle(sourceId: string, targetId: string): Promise<void> {
@@ -276,21 +273,7 @@ export class TaskStore {
   }
 
   private async writeTask(task: Task): Promise<Task> {
-    let next = task;
-    for (let attempt = 0; attempt < 5; attempt += 1) {
-      const result = await this.backend.tasks.putTask(next);
-      if (result.written) {
-        return next;
-      }
-
-      const existing = await this.backend.tasks.getTask(next.id);
-      if (!existing) {
-        continue;
-      }
-
-      next = reconcileTasks(next, existing);
-    }
-
-    throw new KaryaError(`Could not write task ${task.id} due to repeated conflicts`, "WRITE_CONFLICT");
+    await this.backend.tasks.putTask(task);
+    return task;
   }
 }

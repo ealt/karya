@@ -3,12 +3,13 @@ import { filterTasks } from "../../src/core/query.js";
 import { makeTask, makeUser } from "../helpers/factories.js";
 
 describe("filterTasks", () => {
-  it("filters by owner, assignee, and assignee type", () => {
+  it("filters by owner, assignee, assignee type, and open/closed view", () => {
     const agent = makeUser({ id: "agent001", alias: "agent", type: "agent" });
     const human = makeUser({ id: "human001", alias: "human", type: "human" });
     const tasks = [
       makeTask({ id: "task0001", ownerId: human.id, assigneeId: agent.id, tags: ["cli"] }),
-      makeTask({ id: "task0002", ownerId: agent.id, assigneeId: human.id }),
+      makeTask({ id: "task0002", ownerId: human.id, assigneeId: agent.id, closedAt: "2026-03-25T01:00:00.000Z" }),
+      makeTask({ id: "task0003", ownerId: agent.id, assigneeId: human.id }),
     ];
     const users = new Map([
       [agent.id, agent],
@@ -22,8 +23,9 @@ describe("filterTasks", () => {
         assigneeType: "agent",
       },
       (id) => users.get(id) ?? null,
+      "closed",
     );
 
-    expect(filtered.map((task) => task.id)).toEqual(["task0001"]);
+    expect(filtered.map((task) => task.id)).toEqual(["task0002"]);
   });
 });

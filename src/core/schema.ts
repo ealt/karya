@@ -3,7 +3,6 @@ import { DEFAULT_BACKEND_TYPE, DEFAULT_PRIORITY, DEFAULT_PROJECT } from "../shar
 
 export const UserTypeSchema = z.enum(["human", "agent"]);
 export const PrioritySchema = z.enum(["P0", "P1", "P2", "P3"]);
-export const StatusSchema = z.enum(["open", "in_progress", "done", "cancelled"]);
 export const RelationTypeSchema = z.enum(["parent", "blocks"]);
 
 export const UserSchema = z.object({
@@ -20,15 +19,12 @@ export const TaskSchema = z.object({
   title: z.string().min(1),
   project: z.string().min(1).default(DEFAULT_PROJECT),
   priority: PrioritySchema.default(DEFAULT_PRIORITY),
-  status: StatusSchema.default("open"),
   note: z.string().nullable().default(null),
   ownerId: z.string().length(8).nullable().default(null),
   assigneeId: z.string().length(8).nullable().default(null),
-  createdBy: z.string().length(8),
-  updatedBy: z.string().length(8),
   tags: z.array(z.string()).default([]),
-  createdAt: z.string().datetime(),
-  updatedAt: z.string().datetime(),
+  openedAt: z.string().datetime(),
+  closedAt: z.string().datetime().nullable().default(null),
 });
 
 export const TaskRelationSchema = z.object({
@@ -53,7 +49,6 @@ export const BackendConfigSchema = z.discriminatedUnion("type", [
 export const FilterAliasValueSchema = z.object({
   project: z.string().optional(),
   priority: PrioritySchema.optional(),
-  status: StatusSchema.optional(),
   tag: z.string().optional(),
   owner: z.string().optional(),
   assignee: z.string().optional(),
@@ -63,7 +58,6 @@ export const FilterAliasValueSchema = z.object({
 export const ListFiltersSchema = z.object({
   project: z.array(z.string()).optional(),
   priority: z.array(PrioritySchema).optional(),
-  status: z.array(StatusSchema).optional(),
   tag: z.array(z.string()).optional(),
   ownerId: z.string().nullable().optional(),
   assigneeId: z.string().nullable().optional(),
@@ -82,7 +76,6 @@ export const AppConfigSchema = z.object({
 export type UserType = z.infer<typeof UserTypeSchema>;
 export type User = z.infer<typeof UserSchema>;
 export type Priority = z.infer<typeof PrioritySchema>;
-export type TaskStatus = z.infer<typeof StatusSchema>;
 export type RelationType = z.infer<typeof RelationTypeSchema>;
 export type Task = z.infer<typeof TaskSchema>;
 export type TaskRelation = z.infer<typeof TaskRelationSchema>;

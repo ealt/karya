@@ -18,17 +18,33 @@ describe("schema", () => {
     const task = TaskSchema.parse({
       id: "task1234",
       title: "Test",
-      createdBy: "user1234",
-      updatedBy: "user1234",
-      createdAt: "2026-03-25T00:00:00.000Z",
-      updatedAt: "2026-03-25T00:00:00.000Z",
+      openedAt: "2026-03-25T00:00:00.000Z",
     });
 
     expect(task.project).toBe("inbox");
     expect(task.priority).toBe("P2");
-    expect(task.status).toBe("open");
     expect(task.note).toBeNull();
+    expect(task.closedAt).toBeNull();
     expect(task.tags).toEqual([]);
+  });
+
+  it("strips legacy lifecycle and audit fields", () => {
+    const parsed = TaskSchema.parse({
+      id: "task1234",
+      title: "Legacy payload",
+      openedAt: "2026-03-25T00:00:00.000Z",
+      status: "done",
+      createdAt: "2026-03-25T00:00:00.000Z",
+      updatedAt: "2026-03-25T01:00:00.000Z",
+      createdBy: "user1234",
+      updatedBy: "user1234",
+    });
+
+    expect("status" in parsed).toBe(false);
+    expect("createdAt" in parsed).toBe(false);
+    expect("updatedAt" in parsed).toBe(false);
+    expect("createdBy" in parsed).toBe(false);
+    expect("updatedBy" in parsed).toBe(false);
   });
 
   it("parses relation schema", () => {
