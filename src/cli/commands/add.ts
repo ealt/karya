@@ -1,47 +1,67 @@
 import { Command } from "commander";
 import type { Priority } from "../../core/schema.js";
-import type { CliRuntime } from "../shared/runtime.js";
+import type { CliRuntime, CommandContext } from "../shared/runtime.js";
+
+async function resolveUserId(context: CommandContext, reference: string | undefined, fallbackId: string): Promise<string | null> {
+  if (reference === undefined) {
+    return fallbackId;
+  }
+  if (reference === "none") {
+    return null;
+  }
+
+  return (await context.userStore.resolveUser(reference)).id;
+}
 
 export function registerAddCommand(program: Command, runtime: CliRuntime): void {
   program
     .command("add")
     .description("Add a new task")
     .argument("<title>", "Task title")
-    .option("-d, --description <text>", "Task description")
     .option("-p, --project <project>", "Task project")
     .option("-P, --priority <priority>", "Priority P0-P3")
     .option("-t, --tags <tags>", "Comma-separated tags")
-    .option("--due <due>", "Due date (ISO, today, tomorrow, next week)")
     .option("--parent <id>", "Parent task id")
-    .option("--note <note>", "Initial note")
+    .option("--owner <alias>", "Owner alias or 'none'")
+    .option("--assignee <alias>", "Assignee alias or 'none'")
+    .option("--note <note>", "Task note")
     .action(async (title: string, options: Record<string, string | undefined>, command: Command) => {
-      await runtime.runCommand(command, async (context) => {
-        const write = await runtime.runWrite(context, async () =>
-          context.store.addTask(
-            {
-              title,
-              description: options.description,
-              project: options.project,
-              tags: runtime.parseCsv(options.tags),
-              priority: options.priority as Priority | undefined,
-              due: options.due,
-              parentId: options.parent,
-              note: options.note,
-            },
-            context.config.author,
-            {
-              project: context.config.defaultProject,
-              priority: context.config.defaultPriority,
-            },
-          ),
-        );
+      await runtime.runCommand(
+        command,
+        async (context) => {
+          const currentUser = context.currentUser!;
+          const ownerId = await resolveUserId(context, options.owner, currentUser.id);
+          const assigneeId = await resolveUserId(context, options.assignee, currentUser.id);
+          const tags = Array.from(new Set([...(runtime.parseCsv(options.tags) ?? []), ...context.config.autoTags]));
 
-        return {
-          ok: true,
-          message: `Added ${write.result.id}`,
-          data: write.result,
-          warnings: write.warnings,
-        };
-      });
+          const write = await runtime.runWrite(context, async () =>
+            context.store.addTask(
+              {
+                title,
+                project: options.project,
+                tags,
+                priority: options.priority as Priority | undefined,
+                parentId: options.parent,
+                ownerId: ownerId ?? undefined,
+                assigneeId: assigneeId ?? undefined,
+                note: options.note,
+              },
+              currentUser.id,
+              {
+                project: context.config.defaultProject,
+                priority: context.config.defaultPriority,
+              },
+            ),
+          );
+
+          return {
+            ok: true,
+            message: `Added ${write.result.id}`,
+            data: write.result,
+            warnings: write.warnings,
+          };
+        },
+        { requireActiveUser: true },
+      );
     });
 }

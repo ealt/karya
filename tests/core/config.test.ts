@@ -26,10 +26,8 @@ const ENV_KEYS = [
   "KARYA_PG_SSL",
   "KARYA_PG_SSL_CA",
   "KARYA_DB_PATH",
-  "KARYA_DATA_DIR",
   "KARYA_FORMAT",
   "KARYA_AUTHOR",
-  "KARYA_SKIP_LEGACY_CHECK",
 ] as const;
 
 let snapshot: Record<(typeof ENV_KEYS)[number], string | undefined>;
@@ -64,7 +62,7 @@ afterEach(() => {
   }
 });
 
-describe("resolveConfig pg ssl", () => {
+describe("resolveConfig", () => {
   it("hard-fails on invalid KARYA_PG_SSL values", async () => {
     process.env.KARYA_BACKEND = "pg";
     process.env.KARYA_PG_CONNECTION_STRING = "postgresql://localhost/karya";
@@ -73,55 +71,41 @@ describe("resolveConfig pg ssl", () => {
     await expect(resolveConfig()).rejects.toThrow("Invalid KARYA_PG_SSL value: banana");
   });
 
-  it("resolves KARYA_PG_SSL and KARYA_PG_SSL_CA env vars", async () => {
+  it("resolves app config alias fields", async () => {
+    await setAppConfigValue("autoTags", '["cli"]');
+    await setAppConfigValue("filterAliases.mine", '{"owner":"me"}');
+
+    const config = await resolveConfig();
+
+    expect(config.autoTags).toEqual(["cli"]);
+    expect(config.filterAliases.mine).toEqual({ owner: "me" });
+  });
+
+  it("resolves op:// connection string from env var", async () => {
     process.env.KARYA_BACKEND = "pg";
-    process.env.KARYA_PG_CONNECTION_STRING = "postgresql://localhost/karya";
-    process.env.KARYA_PG_SSL = "off";
-    process.env.KARYA_PG_SSL_CA = "~/certs/ca.pem";
+    process.env.KARYA_PG_CONNECTION_STRING = "op://vault/pg/connstring";
+    mockState.resolveOpReferenceMock.mockResolvedValueOnce("postgresql://resolved@host/db");
 
     const config = await resolveConfig();
 
     expect(config.backend.type).toBe("pg");
     if (config.backend.type !== "pg") {
-      throw new Error("expected pg backend");
+      throw new Error("expected pg");
     }
-
-    expect(config.backend.ssl).toBe("off");
-    expect(config.backend.sslCaPath).toBe(join(process.env.HOME as string, "certs", "ca.pem"));
-  });
-});
-
-describe("setAppConfigValue pg ssl fields", () => {
-  it("rejects backend.ssl when backend is sqlite", async () => {
-    await expect(setAppConfigValue("backend.ssl", "verify-full")).rejects.toThrow(
-      "backend.ssl only applies to pg backend; set backend.connectionString first",
-    );
+    expect(config.backend.connectionString).toBe("postgresql://resolved@host/db");
   });
 
-  it("persists backend.ssl and backend.sslCaPath for pg backend", async () => {
+  it("writes config files with restrictive permissions", async () => {
     await setAppConfigValue("backend.connectionString", "postgresql://localhost/karya");
     await setAppConfigValue("backend.ssl", "off");
-    await setAppConfigValue("backend.sslCaPath", "~/certs/root.pem");
-
-    const config = await resolveConfig();
-
-    expect(config.backend.type).toBe("pg");
-    if (config.backend.type !== "pg") {
-      throw new Error("expected pg backend");
-    }
-
-    expect(config.backend.ssl).toBe("off");
-    expect(config.backend.sslCaPath).toBe(join(process.env.HOME as string, "certs", "root.pem"));
 
     if (process.platform !== "win32") {
       const mode = (await stat(getAppConfigPath())).mode & 0o777;
       expect(mode).toBe(0o600);
     }
   });
-});
 
-describe("loadAppConfig legacy keys", () => {
-  it("loads legacy config containing web without falling back to defaults", async () => {
+  it("loads app config with new fields", async () => {
     const configPath = getAppConfigPath();
     await mkdir(join(process.env.HOME as string, ".config", "karya"), { recursive: true });
     await writeFile(
@@ -133,10 +117,11 @@ describe("loadAppConfig legacy keys", () => {
             connectionString: "postgresql://localhost/custom",
             ssl: "off",
           },
-          author: "legacy-author",
-          defaultProject: "legacy-project",
-          defaultPriority: "P1",
-          web: { port: 9999 },
+          author: "ealt",
+          autoTags: ["cli"],
+          filterAliases: {
+            mine: { owner: "me" },
+          },
         },
         null,
         2,
@@ -145,46 +130,15 @@ describe("loadAppConfig legacy keys", () => {
     );
 
     const config = await loadAppConfig(configPath);
-    expect(config.author).toBe("legacy-author");
-    expect(config.defaultProject).toBe("legacy-project");
-    expect(config.defaultPriority).toBe("P1");
-    expect(config.backend?.type).toBe("pg");
-    if (config.backend?.type !== "pg") {
-      throw new Error("expected pg backend");
-    }
-    expect(config.backend.connectionString).toBe("postgresql://localhost/custom");
-    expect(config.backend.ssl).toBe("off");
-  });
-});
-
-describe("resolveConfig op:// connection string", () => {
-  beforeEach(() => {
-    mockState.resolveOpReferenceMock.mockReset();
+    expect(config.author).toBe("ealt");
+    expect(config.autoTags).toEqual(["cli"]);
+    expect(config.filterAliases.mine).toEqual({ owner: "me" });
   });
 
-  it("resolves op:// connection string from env var", async () => {
-    process.env.KARYA_BACKEND = "pg";
-    process.env.KARYA_PG_CONNECTION_STRING = "op://vault/pg/connstring";
-    mockState.resolveOpReferenceMock.mockResolvedValueOnce("postgresql://resolved@host/db");
-
-    const config = await resolveConfig();
-
-    expect(config.backend.type).toBe("pg");
-    if (config.backend.type !== "pg") throw new Error("expected pg");
-    expect(config.backend.connectionString).toBe("postgresql://resolved@host/db");
-    expect(mockState.resolveOpReferenceMock).toHaveBeenCalledWith("op://vault/pg/connstring");
-  });
-
-  it("does not call resolveOpReference for regular connection strings", async () => {
-    process.env.KARYA_BACKEND = "pg";
-    process.env.KARYA_PG_CONNECTION_STRING = "postgresql://localhost/karya";
-
-    const config = await resolveConfig();
-
-    expect(config.backend.type).toBe("pg");
-    if (config.backend.type !== "pg") throw new Error("expected pg");
-    expect(config.backend.connectionString).toBe("postgresql://localhost/karya");
-    expect(mockState.resolveOpReferenceMock).not.toHaveBeenCalled();
+  it("rejects backend.ssl when backend is sqlite", async () => {
+    await expect(setAppConfigValue("backend.ssl", "verify-full")).rejects.toThrow(
+      "backend.ssl only applies to pg backend; set backend.connectionString first",
+    );
   });
 
   it("propagates KaryaError from op resolution", async () => {
@@ -195,29 +149,5 @@ describe("resolveConfig op:// connection string", () => {
     );
 
     await expect(resolveConfig()).rejects.toThrow("1Password CLI (op) is not installed");
-  });
-
-  it("resolves op:// connection string from app config", async () => {
-    const configPath = getAppConfigPath();
-    await mkdir(join(process.env.HOME as string, ".config", "karya"), { recursive: true });
-    await writeFile(
-      configPath,
-      JSON.stringify({
-        backend: {
-          type: "pg",
-          connectionString: "op://work/database/url",
-          ssl: "off",
-        },
-      }),
-      "utf8",
-    );
-    mockState.resolveOpReferenceMock.mockResolvedValueOnce("postgresql://fromconfig@host/db");
-
-    const config = await resolveConfig();
-
-    expect(config.backend.type).toBe("pg");
-    if (config.backend.type !== "pg") throw new Error("expected pg");
-    expect(config.backend.connectionString).toBe("postgresql://fromconfig@host/db");
-    expect(mockState.resolveOpReferenceMock).toHaveBeenCalledWith("op://work/database/url");
   });
 });

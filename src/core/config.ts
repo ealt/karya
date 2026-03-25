@@ -1,16 +1,20 @@
-import { access, chmod, mkdir, readdir, readFile, writeFile } from "node:fs/promises";
-import { constants as fsConstants } from "node:fs";
+import { chmod, mkdir, readFile, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
+import { DEFAULT_BACKEND_TYPE, DEFAULT_FORMAT, DEFAULT_PRIORITY, DEFAULT_PROJECT } from "../shared/constants.js";
 import { KaryaError } from "./errors.js";
 import { isOpReference, resolveOpReference } from "./op-resolve.js";
-import { AppConfigSchema, type AppConfig, type BackendConfig, type Priority } from "./schema.js";
-import { DEFAULT_BACKEND_TYPE, DEFAULT_FORMAT, DEFAULT_PRIORITY, DEFAULT_PROJECT } from "../shared/constants.js";
+import {
+  AppConfigSchema,
+  type AppConfig,
+  type BackendConfig,
+  type FilterAliasValue,
+  type Priority,
+} from "./schema.js";
 
 export type OutputFormat = "human" | "json";
 
 export interface ResolveConfigOptions {
-  dataDir?: string;
   dbPath?: string;
   backendType?: "sqlite" | "pg";
   connectionString?: string;
@@ -18,7 +22,6 @@ export interface ResolveConfigOptions {
   sslCaPath?: string;
   format?: OutputFormat;
   author?: string;
-  skipLegacyCheck?: boolean;
 }
 
 export interface ResolvedConfig {
@@ -27,31 +30,17 @@ export interface ResolvedConfig {
   author: string;
   defaultProject: string;
   defaultPriority: Priority;
+  autoTags: string[];
+  filterAliases: Record<string, FilterAliasValue>;
   appConfigPath: string;
-  skipLegacyCheck: boolean;
 }
 
 function expandHome(path: string): string {
   if (path.startsWith("~/")) {
     return join(homedir(), path.slice(2));
   }
+
   return path;
-}
-
-function parseBool(input: string | undefined): boolean | undefined {
-  if (input === undefined) {
-    return undefined;
-  }
-
-  const value = input.trim().toLowerCase();
-  if (["1", "true", "yes", "on"].includes(value)) {
-    return true;
-  }
-  if (["0", "false", "no", "off"].includes(value)) {
-    return false;
-  }
-
-  return undefined;
 }
 
 function parseBackendType(input: string | undefined): "sqlite" | "pg" | undefined {
@@ -113,29 +102,15 @@ const DEFAULT_APP_CONFIG: AppConfig = {
   defaultProject: DEFAULT_PROJECT,
   defaultPriority: DEFAULT_PRIORITY,
   author: "cli",
+  autoTags: [],
+  filterAliases: {},
 };
-
-function migrateLegacyConfig(parsed: Record<string, unknown>): Record<string, unknown> {
-  const next = { ...parsed };
-
-  if (!("backend" in next) && typeof next.dataDir === "string" && next.dataDir.length > 0) {
-    next.backend = sqliteBackend(join(expandHome(next.dataDir), "karya.db"));
-  }
-
-  delete next.dataDir;
-  delete next.autoSync;
-  delete next.web;
-
-  return next;
-}
 
 export async function loadAppConfig(path = getAppConfigPath()): Promise<AppConfig> {
   try {
     const raw = await readFile(path, "utf8");
     const parsed = JSON.parse(raw) as Record<string, unknown>;
-    const migrated = migrateLegacyConfig(parsed);
-    const merged = { ...DEFAULT_APP_CONFIG, ...migrated };
-
+    const merged = { ...DEFAULT_APP_CONFIG, ...parsed };
     return AppConfigSchema.parse(merged);
   } catch {
     return { ...DEFAULT_APP_CONFIG };
@@ -145,15 +120,41 @@ export async function loadAppConfig(path = getAppConfigPath()): Promise<AppConfi
 export async function saveAppConfig(patch: Record<string, unknown>, path = getAppConfigPath()): Promise<void> {
   const current = await loadAppConfig(path);
   const updated = { ...current, ...patch };
-
   const validated = AppConfigSchema.parse(updated);
+
   await mkdir(dirname(path), { recursive: true });
   await writeFile(path, `${JSON.stringify(validated, null, 2)}\n`, "utf8");
   try {
     await chmod(path, 0o600);
   } catch {
-    // Ignore unsupported chmod platforms and permission errors.
+    // Best effort only.
   }
+}
+
+function updateNestedObject(
+  target: Record<string, unknown>,
+  path: string[],
+  value: unknown,
+): Record<string, unknown> {
+  if (path.length === 0) {
+    return target;
+  }
+
+  if (path.length === 1) {
+    return {
+      ...target,
+      [path[0]]: value,
+    };
+  }
+
+  const [head, ...rest] = path;
+  const current = target[head];
+  const next = current && typeof current === "object" && !Array.isArray(current) ? (current as Record<string, unknown>) : {};
+
+  return {
+    ...target,
+    [head]: updateNestedObject(next, rest, value),
+  };
 }
 
 export async function setAppConfigValue(key: string, value: string): Promise<void> {
@@ -164,30 +165,50 @@ export async function setAppConfigValue(key: string, value: string): Promise<voi
     return;
   }
 
+  if (key === "autoTags") {
+    const parsed = JSON.parse(value) as unknown;
+    if (!Array.isArray(parsed) || parsed.some((item) => typeof item !== "string")) {
+      throw new KaryaError("autoTags must be a JSON array of strings", "CONFIG");
+    }
+
+    await saveAppConfig({ autoTags: parsed });
+    return;
+  }
+
+  if (key.startsWith("filterAliases.")) {
+    const name = key.slice("filterAliases.".length).trim();
+    if (!name) {
+      throw new KaryaError("filterAliases key must include an alias name", "CONFIG");
+    }
+
+    const parsed = JSON.parse(value) as unknown;
+    const nextAliases = updateNestedObject(current.filterAliases as Record<string, unknown>, [name], parsed);
+    await saveAppConfig({ filterAliases: nextAliases });
+    return;
+  }
+
   if (key === "backend.type") {
     if (value === "sqlite") {
       const existingPath =
-        current.backend?.type === "sqlite" && current.backend.dbPath.length > 0
-          ? current.backend.dbPath
-          : defaultDbPath();
+        current.backend?.type === "sqlite" && current.backend.dbPath.length > 0 ? current.backend.dbPath : defaultDbPath();
       await saveAppConfig({ backend: sqliteBackend(existingPath) });
       return;
     }
 
     if (value === "pg") {
-      if (current.backend?.type === "pg") {
-        await saveAppConfig({
-          backend: {
-            type: "pg",
-            connectionString: current.backend.connectionString,
-            ssl: current.backend.ssl,
-            sslCaPath: current.backend.sslCaPath,
-          },
-        });
-        return;
+      if (current.backend?.type !== "pg") {
+        throw new KaryaError("Set backend.connectionString before switching backend.type to pg", "CONFIG");
       }
 
-      throw new KaryaError("Set backend.connectionString before switching backend.type to pg", "CONFIG");
+      await saveAppConfig({
+        backend: {
+          type: "pg",
+          connectionString: current.backend.connectionString,
+          ssl: current.backend.ssl,
+          sslCaPath: current.backend.sslCaPath,
+        },
+      });
+      return;
     }
 
     throw new KaryaError(`Invalid backend.type: ${value}`, "CONFIG");
@@ -214,7 +235,6 @@ export async function setAppConfigValue(key: string, value: string): Promise<voi
     if (current.backend?.type !== "pg") {
       throw new KaryaError("backend.ssl only applies to pg backend; set backend.connectionString first", "CONFIG");
     }
-
     if (value !== "verify-full" && value !== "off") {
       throw new KaryaError(`Invalid backend.ssl: ${value}`, "CONFIG");
     }
@@ -235,20 +255,14 @@ export async function setAppConfigValue(key: string, value: string): Promise<voi
       throw new KaryaError("backend.sslCaPath only applies to pg backend; set backend.connectionString first", "CONFIG");
     }
 
-    const sslCaPath = value.trim().length > 0 ? expandHome(value) : undefined;
     await saveAppConfig({
       backend: {
         type: "pg",
         connectionString: current.backend.connectionString,
         ssl: current.backend.ssl,
-        sslCaPath,
+        sslCaPath: value.trim() ? expandHome(value) : undefined,
       },
     });
-    return;
-  }
-
-  if (key === "dataDir") {
-    await saveAppConfig({ backend: sqliteBackend(join(expandHome(value), "karya.db")) });
     return;
   }
 
@@ -260,16 +274,8 @@ function resolveSqlitePath(options: ResolveConfigOptions, appConfig: AppConfig):
     return expandHome(options.dbPath);
   }
 
-  if (typeof options.dataDir === "string" && options.dataDir.length > 0) {
-    return join(expandHome(options.dataDir), "karya.db");
-  }
-
   if (typeof process.env.KARYA_DB_PATH === "string" && process.env.KARYA_DB_PATH.length > 0) {
     return expandHome(process.env.KARYA_DB_PATH);
-  }
-
-  if (typeof process.env.KARYA_DATA_DIR === "string" && process.env.KARYA_DATA_DIR.length > 0) {
-    return join(expandHome(process.env.KARYA_DATA_DIR), "karya.db");
   }
 
   if (appConfig.backend?.type === "sqlite") {
@@ -324,37 +330,12 @@ export async function resolveConfig(options: ResolveConfigOptions = {}): Promise
 
   return {
     backend,
-    format: options.format ?? parseFormat(env.KARYA_FORMAT) ?? (DEFAULT_FORMAT as OutputFormat),
+    format: options.format ?? parseFormat(env.KARYA_FORMAT) ?? DEFAULT_FORMAT,
     author: options.author ?? env.KARYA_AUTHOR ?? appConfig.author,
     defaultProject: appConfig.defaultProject,
     defaultPriority: appConfig.defaultPriority,
+    autoTags: appConfig.autoTags,
+    filterAliases: appConfig.filterAliases,
     appConfigPath,
-    skipLegacyCheck: options.skipLegacyCheck ?? parseBool(env.KARYA_SKIP_LEGACY_CHECK) ?? false,
   };
-}
-
-export async function detectLegacyData(config: ResolvedConfig): Promise<string | null> {
-  if (config.backend.type !== "sqlite") {
-    return null;
-  }
-
-  const oldTasksDir = join(dirname(config.backend.dbPath), "tasks");
-  try {
-    await access(oldTasksDir, fsConstants.F_OK);
-    const entries = await readdir(oldTasksDir, { withFileTypes: true });
-    const hasJsonTasks = entries.some((entry) => entry.isFile() && entry.name.endsWith(".json"));
-
-    if (!hasJsonTasks) {
-      return null;
-    }
-
-    return [
-      "Legacy JSON task data detected.",
-      `Found: ${oldTasksDir}`,
-      "Run migration import before continuing:",
-      `  karya --db-path ${config.backend.dbPath} --skip-legacy-check import --input ${join(dirname(config.backend.dbPath))}`,
-    ].join("\n");
-  } catch {
-    return null;
-  }
 }

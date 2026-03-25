@@ -7,6 +7,7 @@ export class KaryaError extends Error {
       | "INVALID_ID"
       | "INVALID_STATE"
       | "CONFIG"
+      | "SCHEMA_MISMATCH"
       | "WRITE_CONFLICT"
       | "VALIDATION"
       | "USAGE",

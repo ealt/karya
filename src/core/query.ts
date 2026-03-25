@@ -1,6 +1,6 @@
-import type { ListFilters, Task } from "./schema.js";
+import type { ListFilters, Task, User } from "./schema.js";
 
-export function filterTasks(tasks: Task[], filters: ListFilters): Task[] {
+export function filterTasks(tasks: Task[], filters: ListFilters, userLookup?: (id: string) => User | null): Task[] {
   return tasks
     .filter((task) => {
       if (filters.project && filters.project.length > 0 && !filters.project.includes(task.project)) {
@@ -14,6 +14,22 @@ export function filterTasks(tasks: Task[], filters: ListFilters): Task[] {
       }
       if (filters.tag && filters.tag.length > 0 && !filters.tag.every((tag) => task.tags.includes(tag))) {
         return false;
+      }
+      if (filters.ownerId !== undefined && task.ownerId !== filters.ownerId) {
+        return false;
+      }
+      if (filters.assigneeId !== undefined && task.assigneeId !== filters.assigneeId) {
+        return false;
+      }
+      if (filters.assigneeType) {
+        if (!task.assigneeId || !userLookup) {
+          return false;
+        }
+
+        const assignee = userLookup(task.assigneeId);
+        if (!assignee || assignee.type !== filters.assigneeType) {
+          return false;
+        }
       }
       return true;
     })

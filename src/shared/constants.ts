@@ -1,4 +1,4 @@
-export const DEFAULT_SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 2;
 export const DEFAULT_PROJECT = "inbox";
 export const DEFAULT_PRIORITY = "P2";
 export const DEFAULT_FORMAT = "human";

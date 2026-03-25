@@ -7,6 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-03-25
+
+### Added
+
+- Multi-user data model with first-class `users`, normalized `tasks`, and
+  `task_relations` tables for SQLite and PostgreSQL backends
+- Interactive `karya setup` flow plus `users add|list|edit|remove` commands
+- Structured filter aliases and auto-tags in app config
+- Owner and assignee fields with list filtering, task assignment defaults, and
+  assignee-type filtering
+- Schema version enforcement through `karya_meta`, including hard failure on
+  legacy v0 SQL schemas
+- Task relations for `parent` and `blocks`
+
+### Changed
+
+- Task notes are now a single optional `note` string on each task instead of an
+  append-only embedded notes array
+- The CLI now uses `edit --status` for state changes instead of dedicated
+  transition commands
+- Export/import now works with `users`, `tasks`, and `relations` directories
+- Human task output includes owner/assignee identifiers and richer task detail
+
+### Removed
+
+- Archive bucket and archive commands; terminal tasks remain in `tasks` and are
+  filtered by `status`
+- Legacy task fields and flags including `description`, `due`, `startedAt`,
+  `completedAt`, `schemaVersion`, and `parentId`
+- Legacy config and migration paths such as `--data-dir`,
+  `--skip-legacy-check`, and JSON migration helpers
+
 ## [0.2.0] - 2026-03-19
 
 ### Added
@@ -51,7 +83,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - JSON export/import for portability
 - Legacy JSON file migration path
 
-[Unreleased]: https://github.com/ealt/karya/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/ealt/karya/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/ealt/karya/compare/v0.2.0...v1.0.0
 [0.2.0]: https://github.com/ealt/karya/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/ealt/karya/releases/tag/v0.1.1
 [0.1.0]: https://github.com/ealt/karya/releases/tag/v0.1.0
