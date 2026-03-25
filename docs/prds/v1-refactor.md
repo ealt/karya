@@ -4,8 +4,9 @@
 
 Karya v1.0.0 redesigns the task model around explicit users, normalized SQL
 tables, relationship support, and better CLI ergonomics. It removes the
-archive/bucket concept, keeps terminal tasks in the main task set, and adds a
-first-run `setup` flow for backend configuration and local user identity.
+archive/bucket concept, keeps terminal tasks in the main task set, simplifies
+task notes to a single optional string field, and adds a first-run `setup`
+flow for backend configuration and local user identity.
 
 This is a breaking schema change.
 
@@ -34,7 +35,8 @@ become limiting:
 
 - Introduce a first-class users model
 - Normalize tasks into queryable SQL columns
-- Move notes and relations into separate tables
+- Simplify task notes to a single optional string field
+- Move relationships into a separate table
 - Replace archive/bucket with status-based filtering
 - Add better CLI support for users, relations, and surgical tag updates
 - Add an interactive and non-interactive `setup` command
@@ -52,14 +54,14 @@ become limiting:
 ## Key Decisions
 
 1. Archive/bucket is removed entirely.
-2. The SQL model is normalized across four tables: `users`, `tasks`,
-   `task_notes`, and `task_relations`.
+2. The SQL model uses three tables: `users`, `tasks`, and `task_relations`.
 3. TypeScript uses camelCase and SQL uses snake_case, with mapping isolated to
    the backend layer.
 4. Schema compatibility is enforced through a `karya_meta` table with
    `schema_version = 2`.
 5. Mutating commands hard-fail if no configured active user exists.
-6. Notes support both inline text and external references via URI strings.
+6. Each task has a single optional note string that may contain inline text, a
+   URI, or `null`.
 7. Users are deactivated rather than deleted.
 8. Relation integrity is enforced for self-reference, single-parent, and parent
    cycles.
@@ -95,6 +97,7 @@ CREATE TABLE tasks (
   project TEXT,
   priority TEXT,
   status TEXT NOT NULL DEFAULT 'open',
+  note TEXT,
   owner_id TEXT REFERENCES users(id),
   assignee_id TEXT REFERENCES users(id),
   created_by TEXT NOT NULL REFERENCES users(id),
@@ -110,6 +113,7 @@ Queryable fields:
 - `project`
 - `priority`
 - `status`
+- `note`
 - `owner_id`
 - `assignee_id`
 - `created_by`
@@ -127,23 +131,14 @@ Removed from v0:
 - `parentId`
 - archive/bucket state
 
-### Task Notes
+Note semantics:
 
-```sql
-CREATE TABLE task_notes (
-  id TEXT PRIMARY KEY,
-  task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
-  uri TEXT NOT NULL,
-  author_id TEXT REFERENCES users(id),
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-```
-
-Notes are URI-based:
-
-- Inline note text is stored as `text:...`
-- External references such as `file:///...` or `s3://...` are stored as-is
-- Karya renders `text:` notes directly and otherwise shows the stored URI
+- `note` is a single string field on the task
+- it may contain short inline text, a URI, or `null`
+- Karya does not manage multiple notes, note IDs, note authors, or note
+  timestamps
+- if users need a richer note system, they should store that elsewhere and put
+  a reference URI in `note`
 
 ### Task Relations
 
@@ -244,14 +239,16 @@ karya edit <id> --edit-tag size:large
 
 ```bash
 karya add "Ship MVP" --note "initial context"
-karya edit <id> --note "follow-up"
-karya edit <id> --note-uri "file:///docs/spec.md"
+karya edit <id> --note "updated context"
+karya edit <id> --note "s3://bucket/detailed-notes.md"
 ```
 
 Rules:
 
-- `--note <text>` always creates an inline `text:` note
-- `--note-uri <uri>` stores an external URI as-is
+- `--note <value>` stores the exact string value on the task
+- on `karya edit`, `--note` replaces the existing note value
+- the note value may be inline text, a URI, or empty/null if clearing is later
+  supported
 
 ### Filter Aliases
 
@@ -301,7 +298,6 @@ This is a breaking schema change.
 
 - users table plus CRUD and deactivation
 - tasks schema redesign
-- task notes table
 - task relations table
 - archive/bucket removal
 - surgical tag operations

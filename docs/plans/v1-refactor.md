@@ -4,16 +4,16 @@
 
 ## Context
 
-Karya is a single-user SQL-backed task tracker CLI. As usage grows, the freeform author strings, embedded notes, limited relationships, and tag-based metadata create friction. This redesign introduces a proper users table, normalizes task columns, externalizes notes and relations into their own tables, and adds CLI ergonomics (surgical tag ops, filter aliases, interactive setup).
+Karya is a single-user SQL-backed task tracker CLI. As usage grows, the freeform author strings, embedded notes, limited relationships, and tag-based metadata create friction. This redesign introduces a proper users table, normalizes task columns, simplifies notes to a single optional string field on tasks, externalizes relations into their own table, and adds CLI ergonomics (surgical tag ops, filter aliases, interactive setup).
 
 ## Design Decisions
 
 1. **Remove archive/bucket entirely** — no bucket column, no archive commands. Terminal status tasks are filtered via `list --status`.
-2. **Per-entity repositories** — `DbBackend` exposes `.users`, `.tasks`, `.notes`, `.relations` sub-objects.
+2. **Per-entity repositories** — `DbBackend` exposes `.users`, `.tasks`, and `.relations` sub-objects.
 3. **camelCase in TS, snake_case in SQL** — backend layer maps between conventions.
 4. **Schema version check** — A `karya_meta` table stores `schema_version=2`. On startup, `initialize()` checks this: if the table exists with version 1 (or the old `tasks` table has a `bucket` column), hard-fail with a clear error. If no tables exist, create fresh v2 schema.
 5. **Hard-fail on missing identity** — Any mutating command without a configured+existing user fails with "No user configured. Run `karya setup` first." The `setup` command and `users add` are exempt (they create users).
-6. **Notes support both inline text and URIs** — Use a `text:` URI scheme for inline notes (`text:initial context`). The `--note` flag on add/edit creates `text:` notes. `show` renders `text:` URIs as readable content, passes other URIs through as-is.
+6. **Each task has a single optional note string** — `tasks.note` stores either short inline text, a URI, or `null`. Karya does not manage multi-note state.
 7. **User deactivation, not deletion** — `users remove` sets a `deactivatedAt` timestamp. Deactivated users can't be assigned but their audit trail is preserved.
 8. **Relation integrity constraints** — `CHECK(source_id <> target_id)` prevents self-references. Single-parent enforced via `UNIQUE(source_id)` where `type='parent'` (in store layer for SQLite, partial unique index for PG). Cycle detection in store layer.
 9. **Structured filter aliases** — Config uses objects, not raw CLI strings: `{ "mine": { "owner": "me" } }`.
@@ -53,6 +53,7 @@ TaskSchema = z.object({
   project: z.string().min(1).default(DEFAULT_PROJECT),
   priority: PrioritySchema.default(DEFAULT_PRIORITY),
   status: StatusSchema.default("open"),
+  note: z.string().nullable().default(null),   // inline text, URI, or null
   ownerId: z.string().length(8).nullable().default(null),
   assigneeId: z.string().length(8).nullable().default(null),
   createdBy: z.string().length(8),
@@ -60,14 +61,6 @@ TaskSchema = z.object({
   tags: z.array(z.string()).default([]),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
-})
-
-TaskNoteSchema = z.object({
-  id: z.string().length(8),
-  taskId: z.string().length(8),
-  uri: z.string().min(1),             // "text:..." for inline, any URI for external
-  authorId: z.string().length(8).nullable().default(null),
-  createdAt: z.string().datetime(),
 })
 
 RelationTypeSchema = z.enum(["parent", "blocks"])
@@ -111,10 +104,10 @@ AppConfigSchema = z.object({
 BackendConfigSchema (unchanged)
 ```
 
-Exported types: `User`, `UserType`, `Task`, `TaskNote`, `TaskRelation`, `RelationType`, `Priority`, `TaskStatus`, `FilterAliasValue`, `ListFilters`, `AppConfig`, `BackendConfig`
+Exported types: `User`, `UserType`, `Task`, `TaskRelation`, `RelationType`, `Priority`, `TaskStatus`, `FilterAliasValue`, `ListFilters`, `AppConfig`, `BackendConfig`
 
 ### 1.3 `src/core/id.ts`
-- Rename `createTaskId` -> `createId` (used for users, tasks, notes)
+- Rename `createTaskId` -> `createId` (used for users and tasks)
 - Keep the same nanoid(8) implementation
 
 ### 1.4 `src/core/dates.ts`
@@ -124,14 +117,6 @@ Exported types: `User`, `UserType`, `Task`, `TaskNote`, `TaskRelation`, `Relatio
 ### 1.5 `src/core/errors.ts`
 - Add error code `SCHEMA_MISMATCH` for version check failures
 - Keep all existing codes
-
-### 1.6 `src/core/notes.ts` — New file
-URI helpers for the `text:` inline scheme:
-```typescript
-export function createTextNoteUri(body: string): string   // -> "text:<body>"
-export function isTextNote(uri: string): boolean           // uri.startsWith("text:")
-export function getTextNoteBody(uri: string): string       // strip "text:" prefix
-```
 
 ---
 
@@ -158,12 +143,6 @@ export interface TaskRepository {
   deleteTask(id: string): Promise<void>;
 }
 
-export interface TaskNoteRepository {
-  getNotesForTask(taskId: string): Promise<TaskNote[]>;
-  putNote(note: TaskNote): Promise<void>;
-  deleteNote(noteId: string): Promise<void>;
-}
-
 export interface TaskRelationRepository {
   getRelationsForTask(taskId: string): Promise<TaskRelation[]>;
   putRelation(relation: TaskRelation): Promise<void>;
@@ -175,7 +154,6 @@ export interface DbBackend {
   close(): Promise<void>;
   users: UserRepository;
   tasks: TaskRepository;
-  notes: TaskNoteRepository;
   relations: TaskRelationRepository;
 }
 ```
@@ -212,6 +190,7 @@ CREATE TABLE IF NOT EXISTS tasks (
   project TEXT NOT NULL DEFAULT 'inbox',
   priority TEXT NOT NULL DEFAULT 'P2' CHECK(priority IN ('P0','P1','P2','P3')),
   status TEXT NOT NULL DEFAULT 'open' CHECK(status IN ('open','in_progress','done','cancelled')),
+  note TEXT,
   owner_id TEXT REFERENCES users(id),
   assignee_id TEXT REFERENCES users(id),
   created_by TEXT NOT NULL REFERENCES users(id),
@@ -219,14 +198,6 @@ CREATE TABLE IF NOT EXISTS tasks (
   tags TEXT NOT NULL DEFAULT '[]',
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS task_notes (
-  id TEXT PRIMARY KEY,
-  task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
-  uri TEXT NOT NULL,
-  author_id TEXT REFERENCES users(id),
-  created_at TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS task_relations (
@@ -245,7 +216,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_task_relations_single_parent
 Implementation notes:
 - Tags stored as JSON text in SQLite, parsed on read
 - `putTask` uses normalized columns with same `ON CONFLICT ... WHERE updated_at <=` optimistic lock
-- Implements `DbBackend` by composing four repository objects
+- Implements `DbBackend` by composing three repository objects
 - Maps camelCase <-> snake_case in row read/write helpers
 - `PRAGMA foreign_keys = ON` (already in current code)
 
@@ -295,9 +266,9 @@ export interface AddTaskInput {
   project?: string;
   tags?: string[];
   priority?: Priority;
+  note?: string | null;  // inline text, URI, or null
   ownerId?: string;
   assigneeId?: string;
-  noteUri?: string;      // already a full URI (text:... or external)
   parentId?: string;     // creates a "parent" relation
 }
 
@@ -306,6 +277,7 @@ export interface EditTaskInput {
   project?: string;
   priority?: Priority;
   status?: TaskStatus;
+  note?: string | null;   // replaces current note
   ownerId?: string | null;
   assigneeId?: string | null;
   addTags?: string[];
@@ -315,20 +287,17 @@ export interface EditTaskInput {
 
 export interface TaskDetail {
   task: Task;
-  notes: TaskNote[];
   relations: TaskRelation[];
 }
 ```
 
 **Updated methods**:
-- `addTask(input, createdBy, defaults)` — creates task, optionally creates first note (URI already prepared by CLI layer) and parent relation
+- `addTask(input, createdBy, defaults)` — creates task, optionally sets `task.note`, and optionally creates a parent relation
 - `editTask(idOrPrefix, updates, updatedBy)` — supports `status` changes (replacing transitions), surgical tag ops. Validates owner/assignee are active users if provided.
-- `deleteTask(idOrPrefix)` — simplified, no bucket param. CASCADE handles notes/relations.
-- `showTask(idOrPrefix)` — returns `TaskDetail` (task + notes via `backend.notes` + relations via `backend.relations`)
+- `deleteTask(idOrPrefix)` — simplified, no bucket param.
+- `showTask(idOrPrefix)` — returns `TaskDetail` (task + relations via `backend.relations`)
 - `listTasks(options)` — filters include `ownerId`/`assigneeId`
 - `listProjects()` — unchanged logic
-- `addNote(taskIdOrPrefix, uri, authorId)` — creates note via `backend.notes.putNote`
-- `removeNote(noteId)` — delegates to `backend.notes.deleteNote`
 - `addRelation(sourceIdOrPrefix, targetIdOrPrefix, type)` — resolves both IDs, validates no cycle for "parent" type (walk ancestors), creates relation
 - `removeRelation(sourceId, targetId, type)` — delegates
 - `resolveTaskReference(idOrPrefix)` — simplified, returns `{ task: Task; id: string }` (no bucket)
@@ -351,10 +320,10 @@ if (updates.editTags) {
 Walk the ancestor chain from `targetId` upward (follow "parent" relations). If `sourceId` is found in the chain, throw `VALIDATION` error.
 
 ### 3.3 `src/core/reconcile.ts` — Simplify
-- Remove `mergeNotes` (notes are separate table rows)
+- Remove `mergeNotes`
 - Remove `conflicts` field handling
 - Reconcile flat task fields only; tags merge as union of both arrays (deduplicated)
-- Last-writer-wins by `updatedAt` for scalar fields
+- Last-writer-wins by `updatedAt` for scalar fields including `note`
 
 ### 3.4 `src/core/query.ts` — Update
 - Add `ownerId` and `assigneeId` filter support
@@ -409,10 +378,7 @@ No archive concept.
 ### 4.5 `src/cli/commands/add.ts` — Rewrite
 Remove: `-d/--description`, `--due`
 Keep: `--parent <id>`
-Add: `--owner <alias>`, `--assignee <alias>`, `--note <text>` (always inline text), `--note-uri <uri>` (external reference)
-
-- `--note <text>` always wraps in `text:` scheme (no heuristic detection)
-- `--note-uri <uri>` stores the URI as-is (for external references like `file:///...`, `s3://...`, etc.)
+Add: `--owner <alias>`, `--assignee <alias>`, `--note <value>` (stores exact string on `task.note`)
 
 Auto-defaults:
 - `ownerId` from configured user (resolved via `userStore`)
@@ -426,8 +392,7 @@ Add:
 - `--owner <alias>`, `--assignee <alias>` — resolve via userStore
 - `--add-tag <tag>`, `--rm-tag <tag>`, `--edit-tag <tag>` — surgical tag ops (mutually exclusive with `-t/--tags`)
 - `--parent <id>`, `--blocks <id>`, `--blocked-by <id>` — create relations after applying field edits
-- `--note <text>` — add inline text note (wraps in `text:` scheme)
-- `--note-uri <uri>` — add external note reference (stored as-is)
+- `--note <value>` — replace the task note with the exact provided string
 
 For relations, after applying the task edit:
 - `--parent <id>` -> `store.addRelation(taskId, parentId, "parent")`
@@ -476,8 +441,8 @@ const aliasConfig = context.config.filterAliases[alias];
 
 ### 4.10 `src/cli/commands/show.ts` — Update
 - Remove `--active-only` (no archive)
-- Show enriched output: task + notes + relations (from `store.showTask()`)
-- Render `text:` note URIs as readable content, show other URIs as-is
+- Show enriched output: task + relations (from `store.showTask()`)
+- Show the raw `task.note` value when present
 
 ### 4.11 `src/cli/commands/delete.ts` — Update
 - Remove `--archive` flag
@@ -491,11 +456,11 @@ const aliasConfig = context.config.filterAliases[alias];
 ### 4.13 `src/cli/commands/projects.ts` — No changes needed
 
 ### 4.14 `src/cli/commands/export.ts` — Update
-- Export all four entities: users, tasks, notes, relations as separate subdirectories
+- Export all three entities: users, tasks, relations as separate subdirectories
 - Remove bucket/archive distinction
 
 ### 4.15 `src/cli/commands/import.ts` — Update
-- Import all four entities (users first, then tasks, then notes+relations for FK ordering)
+- Import all three entities (users first, then tasks, then relations for FK ordering)
 - Remove bucket/archive references
 - Remove dependency on `migrate.ts`
 
@@ -505,7 +470,7 @@ Add: `registerUsersCommand`, `registerSetupCommand`
 
 ### 4.17 `src/cli/formatters/output.ts` — Update
 - `formatTaskLine` shows owner/assignee if present (just the ID for now; could resolve to alias if userStore available)
-- Add `formatTaskDetail` for `show` output: renders task fields, notes (with `text:` content), and relations
+- Add `formatTaskDetail` for `show` output: renders task fields, optional note, and relations
 
 ### 4.18 `src/cli/shared/aliases.ts` — New file
 Filter alias expansion helper:
@@ -523,15 +488,14 @@ Maps structured alias config to `ListTaskOptions`, resolving `"me"` -> `currentA
 
 ### 5.1 `tests/core/schema.test.ts` — Rewrite
 - Test `UserSchema` (defaults, deactivatedAt nullable)
-- Test new `TaskSchema` (defaults, no description/dueAt/schemaVersion/parentId)
-- Test `TaskNoteSchema`, `TaskRelationSchema`
+- Test new `TaskSchema` (defaults, includes nullable `note`, no description/dueAt/schemaVersion/parentId)
+- Test `TaskRelationSchema`
 - Test `FilterAliasValueSchema`
 - Test `AppConfigSchema` with new fields
 
 ### 5.2 `tests/core/backends/sqlite.test.ts` — Rewrite
-- Test all four repository interfaces
+- Test all three repository interfaces
 - Test FK constraints (task with nonexistent created_by fails)
-- Test CASCADE deletes (delete task cascades notes/relations)
 - Test optimistic locking on putTask (normalized columns)
 - Test prefix lookup (no bucket)
 - Test schema version check: fresh DB succeeds, v0 DB fails with clear error
@@ -551,7 +515,7 @@ Maps structured alias config to `ListTaskOptions`, resolving `"me"` -> `currentA
 - Test addTask with normalized fields
 - Test editTask with `status` changes (replacing transition tests)
 - Test surgical tag operations (addTags, rmTags, editTags)
-- Test note CRUD (addNote, removeNote, show includes notes)
+- Test note replace behavior on add/edit/show
 - Test relation CRUD (addRelation, removeRelation)
 - Test parent cycle detection
 - Test that assigning deactivated user as owner/assignee fails
@@ -593,7 +557,7 @@ Maps structured alias config to `ListTaskOptions`, resolving `"me"` -> `currentA
 - Remove `--skip-legacy-check` from global options and `runtime.ts`
 - Remove `--data-dir` global option (legacy)
 - Bump `package.json` version to `1.0.0`
-- Update `AGENTS.md` with new architecture (4 tables, no bucket/archive, user/task stores, schema version check)
+- Update `AGENTS.md` with new architecture (3 tables, no bucket/archive, user/task stores, schema version check)
 
 ---
 
@@ -606,10 +570,9 @@ Maps structured alias config to `ListTaskOptions`, resolving `"me"` -> `currentA
 | `src/core/id.ts` | Modify (`createTaskId` -> `createId`) |
 | `src/core/dates.ts` | Modify (remove `parseDueInput`) |
 | `src/core/errors.ts` | Modify (add `SCHEMA_MISMATCH`) |
-| `src/core/notes.ts` | **New** (text URI helpers) |
-| `src/core/backend.ts` | Rewrite (4 repository interfaces) |
-| `src/core/backends/sqlite.ts` | Rewrite (4 tables, schema version) |
-| `src/core/backends/pg.ts` | Rewrite (4 tables, PG types) |
+| `src/core/backend.ts` | Rewrite (3 repository interfaces) |
+| `src/core/backends/sqlite.ts` | Rewrite (3 tables, schema version) |
+| `src/core/backends/pg.ts` | Rewrite (3 tables, PG types) |
 | `src/core/create-backend.ts` | No change |
 | `src/core/user-store.ts` | **New** |
 | `src/core/task-store.ts` | Major rewrite |
@@ -631,8 +594,8 @@ Maps structured alias config to `ListTaskOptions`, resolving `"me"` -> `currentA
 | `src/cli/commands/users.ts` | **New** |
 | `src/cli/commands/setup.ts` | **New** |
 | `src/cli/commands/projects.ts` | No change |
-| `src/cli/commands/export.ts` | Update (4 entities) |
-| `src/cli/commands/import.ts` | Update (4 entities) |
+| `src/cli/commands/export.ts` | Update (3 entities) |
+| `src/cli/commands/import.ts` | Update (3 entities) |
 | `src/cli/commands/transitions.ts` | **Delete** |
 | `src/cli/commands/archive.ts` | **Delete** |
 | `src/cli/formatters/output.ts` | Update |
@@ -667,7 +630,7 @@ Tests:
    ```bash
    bun run dev -- setup --backend-type sqlite --db-path /tmp/test.db --name "Test" --alias test
    bun run dev -- --db-path /tmp/test.db users list
-   bun run dev -- --db-path /tmp/test.db add "Ship MVP" -P P1 --note "initial context" --note-uri "file:///docs/spec.md"
+   bun run dev -- --db-path /tmp/test.db add "Ship MVP" -P P1 --note "initial context"
    bun run dev -- --db-path /tmp/test.db list
    bun run dev -- --db-path /tmp/test.db edit <id> --status done --add-tag shipped
    bun run dev -- --db-path /tmp/test.db list --status done
