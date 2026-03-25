@@ -11,7 +11,7 @@ A task is now:
 - open when `closedAt = null`
 - closed when `closedAt` has a timestamp
 
-Also rename `createdAt` to `openedAt` so the model reads consistently. `closedAt` records when the task was first closed, stays unchanged while the task remains closed, and is cleared on reopen.
+Also rename `createdAt` to `openedAt` so the model reads consistently. `closedAt` records when the task was closed, stays unchanged while the task remains closed, and is cleared on reopen.
 
 This also removes Karya's built-in distinction between `done` and `cancelled`. Because this changes the lifecycle model again after `v1.0.0`, it should ship as `v2.0.0`. This refactor also removes task-level audit columns `createdBy`, `updatedBy`, and `updatedAt`.
 
@@ -46,6 +46,7 @@ This also removes Karya's built-in distinction between `done` and `cancelled`. B
   - `--reopen` sets `closedAt = null`
 - Remove all status-based store logic, validation, and types.
 - Remove task-level author/update auditing from store input and persistence.
+- Drop optimistic concurrency entirely and use last-write-wins task updates. Remove `reconcile.ts` usage and any backend `updated_at` write guards instead of replacing them with another coordination mechanism.
 
 ### Query, filters, and aliases
 
@@ -70,6 +71,7 @@ This also removes Karya's built-in distinction between `done` and `cancelled`. B
 ### Import/export and docs
 
 - Update import/export payloads to use `openedAt` and `closedAt`.
+- Treat backward compatibility for importing v1 export payloads as out of scope; v2 import only needs to support the v2 payload shape.
 - Remove references to `done`, `cancelled`, and `status` from docs, examples, changelog text, and acceptance criteria tied to this plan.
 - Update setup docs to say Karya validates an existing alias or offers to create a new user; it does not claim user records.
 
@@ -79,7 +81,7 @@ For databases already on the `v1.0.0` schema, the lifecycle change can be expres
 
 ```sql
 ALTER TABLE tasks ADD COLUMN closed_at TIMESTAMPTZ;
-UPDATE tasks SET closed_at = updated_at WHERE status = 'done';
+UPDATE tasks SET closed_at = updated_at WHERE status IN ('done', 'cancelled');
 ALTER TABLE tasks DROP COLUMN status;
 ALTER TABLE tasks RENAME COLUMN created_at TO opened_at;
 ALTER TABLE tasks DROP COLUMN created_by;
@@ -88,14 +90,14 @@ ALTER TABLE tasks DROP COLUMN updated_at;
 UPDATE karya_meta SET value = '3' WHERE key = 'schema_version';
 ```
 
-This preserves the existing close time approximation for tasks that were previously marked `done`. Tasks with any other status remain open after the migration unless handled separately.
+This preserves the existing close time approximation for tasks that were previously marked `done` or `cancelled`. Tasks with any other prior status remain open after the migration.
 
 ## Implementation Notes
 
 - Keep the existing repository split (`users`, `tasks`, `relations`); this change only alters task lifecycle fields and related filtering/CLI behavior.
 - Backend row mappers must continue to translate between camelCase in TypeScript and snake_case in SQL.
 - If a task is reopened and then closed again, `closedAt` should be set to the new close timestamp.
-- Any optimistic write behavior that depended on `updatedAt` must be removed or replaced as part of this refactor.
+- Any optimistic write behavior that depended on `updatedAt` must be removed as part of this refactor; v2 intentionally uses last-write-wins semantics.
 
 ## Test Plan
 
@@ -118,12 +120,16 @@ This preserves the existing close time approximation for tasks that were previou
   - output shows `openedAt` and `closedAt`
 - Backend round-trip tests:
   - SQLite and Postgres persist/read `opened_at` and `closed_at` correctly
-  - initialization fails on schema versions lower than `3`
+  - initialization fails on schema versions not equal to `3`
+- Concurrency behavior tests:
+  - concurrent writes no longer reject on stale timestamps
+  - the later write wins when two edits race
 - Import/export tests:
   - exported tasks contain `openedAt` and `closedAt`
-  - imported tasks round-trip without `status`
+  - v2 exports import successfully using the v2 payload shape
 
 ## Assumptions
 
 - There is no built-in `done` vs `cancelled` distinction after this change.
 - This remains a breaking schema change with no automatic migration of existing deployed databases.
+- Backward compatibility for importing v1 exports is intentionally out of scope.

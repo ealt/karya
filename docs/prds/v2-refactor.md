@@ -1,5 +1,7 @@
 # Karya v2.0.0 — Simplify Task Lifecycle
 
+**Issue**: <https://github.com/ealt/karya/issues/12>
+
 ## Summary
 
 Replace the `status` column with a `closed_at` timestamp, rename `created_at` to `opened_at`, and drop `created_by`, `updated_by`, and `updated_at`. Reduces the tasks table to 10 columns where everything earns its place.
@@ -14,12 +16,14 @@ Replace the `status` column with a `closed_at` timestamp, rename `created_at` to
 
 ### Final Tasks Schema
 
+Illustrative PostgreSQL shape below; the concrete SQLite DDL keeps the same logical columns and constraints but uses backend-specific storage types for timestamps and tags.
+
 ```sql
 CREATE TABLE tasks (
   id TEXT PRIMARY KEY,
   title TEXT NOT NULL,
-  project TEXT,
-  priority TEXT,
+  project TEXT NOT NULL DEFAULT 'inbox',
+  priority TEXT NOT NULL DEFAULT 'P2' CHECK (priority IN ('P0', 'P1', 'P2', 'P3')),
   owner_id TEXT REFERENCES users(id),
   assignee_id TEXT REFERENCES users(id),
   tags TEXT[] DEFAULT '{}',
@@ -63,6 +67,10 @@ CREATE TABLE task_relations (
 - Set automatically when closing a task
 - Set to NULL when reopening
 
+### Concurrency
+
+Optimistic concurrency is removed in v2. Karya will use last-write-wins semantics for task updates. This is an explicit tradeoff for a small team with low write frequency.
+
 ### Queries
 
 ```sql
@@ -80,8 +88,7 @@ SELECT * FROM tasks;
 
 ### Removed
 
-- `--status` flag on `edit`, `list`, `add`
-- `--author` global flag (no `created_by` to populate)
+- `--status` flag on `edit` and `list`
 - `StatusSchema` type and all status validation
 
 ### New/Changed
@@ -102,14 +109,14 @@ SELECT * FROM tasks;
 
 `karya_meta.schema_version` → `3`
 
-Hard-fail on schema_version < 3 with clear error message.
+Hard-fail on schema_version != 3 with clear error message.
 
 ## Migration (for deployers)
 
 ```sql
 BEGIN;
 ALTER TABLE tasks ADD COLUMN closed_at TIMESTAMPTZ;
-UPDATE tasks SET closed_at = updated_at WHERE status = 'done';
+UPDATE tasks SET closed_at = updated_at WHERE status IN ('done', 'cancelled');
 ALTER TABLE tasks DROP COLUMN status;
 ALTER TABLE tasks RENAME COLUMN created_at TO opened_at;
 ALTER TABLE tasks DROP COLUMN created_by;
@@ -119,6 +126,8 @@ UPDATE karya_meta SET value = '3' WHERE key = 'schema_version';
 COMMIT;
 ```
 
+This treats both prior terminal states, `done` and `cancelled`, as closed in v2.
+
 ## Scope
 
 ### In
@@ -126,11 +135,13 @@ COMMIT;
 - Replace `status` with `closed_at`
 - Rename `created_at` to `opened_at`
 - Drop `created_by`, `updated_by`, `updated_at`
+- Drop optimistic concurrency and use last-write-wins updates
 - Update CLI commands and filters
 - Schema version bump to 3
-- Hard-fail on schema_version < 3
+- Hard-fail on schema_version != 3
 
 ### Out
 
 - Authentication / access control
 - Automatic migration tooling
+- Backward compatibility for importing v1 export payloads
