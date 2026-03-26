@@ -1,6 +1,6 @@
 import { Command } from "commander";
 import { KaryaError } from "../../core/errors.js";
-import type { Priority, TaskStatus } from "../../core/schema.js";
+import type { Priority } from "../../core/schema.js";
 import type { CliRuntime, CommandContext } from "../shared/runtime.js";
 
 async function resolveUserId(
@@ -27,7 +27,8 @@ export function registerEditCommand(program: Command, runtime: CliRuntime): void
     .option("-p, --project <project>", "Project")
     .option("-P, --priority <priority>", "Priority")
     .option("-t, --tags <tags>", "Comma-separated tags")
-    .option("-s, --status <status>", "Status")
+    .option("--close", "Mark task closed")
+    .option("--reopen", "Mark task open")
     .option("--owner <alias>", "Owner alias or 'none'")
     .option("--assignee <alias>", "Assignee alias or 'none'")
     .option("--add-tag <tag>", "Add tag", (value, previous: string[] = []) => [...previous, value])
@@ -37,11 +38,10 @@ export function registerEditCommand(program: Command, runtime: CliRuntime): void
     .option("--blocks <id>", "Add blocks relation")
     .option("--blocked-by <id>", "Add blocked-by relation")
     .option("--note <note>", "Replace note")
-    .action(async (id: string, options: Record<string, string | string[] | undefined>, command: Command) => {
+    .action(async (id: string, options: Record<string, string | string[] | boolean | undefined>, command: Command) => {
       await runtime.runCommand(
         command,
         async (context) => {
-          const currentUser = context.currentUser!;
           const preserve = Symbol("preserve");
           const ownerId = await resolveUserId(context, options.owner as string | undefined, preserve);
           const assigneeId = await resolveUserId(context, options.assignee as string | undefined, preserve);
@@ -51,15 +51,19 @@ export function registerEditCommand(program: Command, runtime: CliRuntime): void
           if (hasReplaceTags && hasSurgicalTags) {
             throw new KaryaError("Cannot combine --tags with --add-tag/--rm-tag/--edit-tag.", "USAGE");
           }
+          if (options.close === true && options.reopen === true) {
+            throw new KaryaError("Cannot combine --close with --reopen.", "USAGE");
+          }
 
           const patch = {
             title: options.title as string | undefined,
             project: options.project as string | undefined,
             priority: options.priority as Priority | undefined,
-            status: options.status as TaskStatus | undefined,
             note: options.note as string | undefined,
             ownerId: ownerId === preserve ? undefined : (ownerId as string | null),
             assigneeId: assigneeId === preserve ? undefined : (assigneeId as string | null),
+            close: options.close === true ? true : undefined,
+            reopen: options.reopen === true ? true : undefined,
             tags: hasReplaceTags ? runtime.parseCsv(options.tags as string) : undefined,
             addTags: options.addTag as string[] | undefined,
             rmTags: options.rmTag as string[] | undefined,
@@ -74,7 +78,7 @@ export function registerEditCommand(program: Command, runtime: CliRuntime): void
           }
 
           const write = await runtime.runWrite(context, async () => {
-            const updated = await context.store.editTask(id, patch, currentUser.id);
+            const updated = await context.store.editTask(id, patch);
             if (typeof options.parent === "string") {
               await context.store.addRelation(updated.id, options.parent, "parent");
             }
@@ -94,7 +98,6 @@ export function registerEditCommand(program: Command, runtime: CliRuntime): void
             warnings: write.warnings,
           };
         },
-        { requireActiveUser: true },
       );
     });
 }

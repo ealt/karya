@@ -17,15 +17,12 @@ export function makeTask(overrides: Partial<Task> = {}): Task {
     title: overrides.title ?? "Test task",
     project: overrides.project ?? "inbox",
     priority: overrides.priority ?? "P2",
-    status: overrides.status ?? "open",
     note: overrides.note ?? null,
     ownerId: overrides.ownerId ?? null,
     assigneeId: overrides.assigneeId ?? null,
-    createdBy: overrides.createdBy ?? "user0001",
-    updatedBy: overrides.updatedBy ?? overrides.createdBy ?? "user0001",
     tags: overrides.tags ?? [],
-    createdAt: overrides.createdAt ?? "2026-03-25T00:00:00.000Z",
-    updatedAt: overrides.updatedAt ?? "2026-03-25T00:00:00.000Z",
+    openedAt: overrides.openedAt ?? "2026-03-25T00:00:00.000Z",
+    closedAt: overrides.closedAt ?? null,
   };
 }
 

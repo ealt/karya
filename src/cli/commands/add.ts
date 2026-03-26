@@ -2,7 +2,11 @@ import { Command } from "commander";
 import type { Priority } from "../../core/schema.js";
 import type { CliRuntime, CommandContext } from "../shared/runtime.js";
 
-async function resolveUserId(context: CommandContext, reference: string | undefined, fallbackId: string): Promise<string | null> {
+async function resolveUserId(
+  context: CommandContext,
+  reference: string | undefined,
+  fallbackId: string | null,
+): Promise<string | null> {
   if (reference === undefined) {
     return fallbackId;
   }
@@ -29,9 +33,8 @@ export function registerAddCommand(program: Command, runtime: CliRuntime): void 
       await runtime.runCommand(
         command,
         async (context) => {
-          const currentUser = context.currentUser!;
-          const ownerId = await resolveUserId(context, options.owner, currentUser.id);
-          const assigneeId = await resolveUserId(context, options.assignee, currentUser.id);
+          const ownerId = await resolveUserId(context, options.owner, null);
+          const assigneeId = await resolveUserId(context, options.assignee, null);
           const tags = Array.from(new Set([...(runtime.parseCsv(options.tags) ?? []), ...context.config.autoTags]));
 
           const write = await runtime.runWrite(context, async () =>
@@ -46,7 +49,6 @@ export function registerAddCommand(program: Command, runtime: CliRuntime): void 
                 assigneeId: assigneeId ?? undefined,
                 note: options.note,
               },
-              currentUser.id,
               {
                 project: context.config.defaultProject,
                 priority: context.config.defaultPriority,
@@ -61,7 +63,6 @@ export function registerAddCommand(program: Command, runtime: CliRuntime): void 
             warnings: write.warnings,
           };
         },
-        { requireActiveUser: true },
       );
     });
 }
