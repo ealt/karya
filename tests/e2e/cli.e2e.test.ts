@@ -17,14 +17,26 @@ interface CliResult {
   code: number;
 }
 
+function buildCliEnv(homeDir: string): NodeJS.ProcessEnv {
+  const env = { ...process.env };
+
+  for (const key of Object.keys(env)) {
+    if (key.startsWith("KARYA_")) {
+      delete env[key];
+    }
+  }
+
+  return {
+    ...env,
+    HOME: homeDir,
+  };
+}
+
 async function runCli(args: string[], homeDir: string): Promise<CliResult> {
   try {
     const { stdout, stderr } = await execFileAsync("node", ["--import", "tsx", "src/cli/index.ts", ...args], {
       cwd: projectRoot,
-      env: {
-        ...process.env,
-        HOME: homeDir,
-      },
+      env: buildCliEnv(homeDir),
       maxBuffer: 10 * 1024 * 1024,
     });
 
