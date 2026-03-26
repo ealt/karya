@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [2.0.0] - 2026-03-26
+
+### Changed
+
+- Task lifecycle simplified to open/closed — `closedAt` timestamp replaces
+  `status` column; a task is open when `closedAt` is null, closed when set
+- `created_at` renamed to `opened_at` across both SQL backends
+- `edit --close` and `edit --reopen` replace `edit --status` for lifecycle
+  transitions
+- `list` defaults to open tasks; `list --closed` shows closed tasks;
+  `list --all` shows both
+- Schema version bumped to 3 with hard failure on older versions
+- Task creation no longer requires a configured author
+- `putTask` uses last-write-wins instead of optimistic concurrency
+
+### Removed
+
+- `status` field and `StatusSchema` validation
+- `created_by`, `updated_by`, and `updated_at` audit columns
+- `--status` flag from `edit` and `list` commands
+- Optimistic write-conflict reconciliation (`reconcile.ts`)
+
 ## [1.0.0] - 2026-03-25
 
 ### Added
@@ -83,7 +105,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - JSON export/import for portability
 - Legacy JSON file migration path
 
-[Unreleased]: https://github.com/ealt/karya/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/ealt/karya/compare/v2.0.0...HEAD
+[2.0.0]: https://github.com/ealt/karya/compare/v1.0.0...v2.0.0
 [1.0.0]: https://github.com/ealt/karya/compare/v0.2.0...v1.0.0
 [0.2.0]: https://github.com/ealt/karya/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/ealt/karya/releases/tag/v0.1.1
