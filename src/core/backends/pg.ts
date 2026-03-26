@@ -14,8 +14,8 @@ interface UserRow {
   name: string;
   alias: string;
   type: string;
-  created_at: string;
-  deactivated_at: string | null;
+  created_at: string | Date;
+  deactivated_at: string | Date | null;
 }
 
 interface TaskRow {
@@ -27,8 +27,8 @@ interface TaskRow {
   owner_id: string | null;
   assignee_id: string | null;
   tags: string[];
-  opened_at: string;
-  closed_at: string | null;
+  opened_at: string | Date;
+  closed_at: string | Date | null;
 }
 
 interface RelationRow {
@@ -42,14 +42,24 @@ export interface PgSslOptions {
   caPath?: string;
 }
 
+function toIso(value: string | Date): string;
+function toIso(value: string | Date | null): string | null;
+function toIso(value: string | Date | null): string | null {
+  if (value == null) {
+    return null;
+  }
+
+  return value instanceof Date ? value.toISOString() : value;
+}
+
 function parseUserRow(row: UserRow): User {
   return UserSchema.parse({
     id: row.id,
     name: row.name,
     alias: row.alias,
     type: row.type,
-    createdAt: row.created_at,
-    deactivatedAt: row.deactivated_at,
+    createdAt: toIso(row.created_at),
+    deactivatedAt: toIso(row.deactivated_at),
   });
 }
 
@@ -63,8 +73,8 @@ function parseTaskRow(row: TaskRow): Task {
     ownerId: row.owner_id,
     assigneeId: row.assignee_id,
     tags: row.tags ?? [],
-    openedAt: row.opened_at,
-    closedAt: row.closed_at,
+    openedAt: toIso(row.opened_at),
+    closedAt: toIso(row.closed_at),
   });
 }
 

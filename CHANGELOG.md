@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [2.0.1] - 2026-03-26
+
+### Fixed
+
+- PostgreSQL reads now normalize `TIMESTAMPTZ` values returned as JavaScript
+  `Date` objects into ISO timestamp strings before schema validation
+- CLI e2e tests now clear inherited `KARYA_*` environment variables before
+  spawning subprocesses so local shell config does not leak into test cases
+
 ## [2.0.0] - 2026-03-26
 
 ### Changed
@@ -105,7 +114,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - JSON export/import for portability
 - Legacy JSON file migration path
 
-[Unreleased]: https://github.com/ealt/karya/compare/v2.0.0...HEAD
+[Unreleased]: https://github.com/ealt/karya/compare/v2.0.1...HEAD
+[2.0.1]: https://github.com/ealt/karya/compare/v2.0.0...v2.0.1
 [2.0.0]: https://github.com/ealt/karya/compare/v1.0.0...v2.0.0
 [1.0.0]: https://github.com/ealt/karya/compare/v0.2.0...v1.0.0
 [0.2.0]: https://github.com/ealt/karya/compare/v0.1.1...v0.2.0
