@@ -107,3 +107,6 @@ Relevant env vars:
 - `bun run test` uses Vitest (not Bun's built-in test runner)
 - `KaryaError` codes: `VALIDATION`, `NOT_FOUND`, `INVALID_ID`,
   `AMBIGUOUS_ID`, `INVALID_STATE`, `CONFIG`, `SCHEMA_MISMATCH`, `USAGE`
+- `pg` is an optional peer dependency — not present in Homebrew/global
+  installs. Dynamic imports of optional deps must be wrapped in try-catch
+  with a helpful `KaryaError` (see `create-backend.ts`)
