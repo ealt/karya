@@ -306,8 +306,6 @@ export class PgBackend implements DbBackend {
         "SCHEMA_MISMATCH",
       );
     }
-
-    await this.createSchema();
   }
 
   async close(): Promise<void> {

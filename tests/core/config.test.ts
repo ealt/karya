@@ -135,6 +135,23 @@ describe("resolveConfig", () => {
     expect(config.filterAliases.mine).toEqual({ owner: "me" });
   });
 
+  it("throws on invalid config values instead of silently falling back", async () => {
+    const configPath = getAppConfigPath();
+    await mkdir(join(process.env.HOME as string, ".config", "karya"), { recursive: true });
+    await writeFile(
+      configPath,
+      JSON.stringify({ backend: { type: "pg", connectionString: "postgresql://localhost/db", ssl: "verify-ca" } }),
+      "utf8",
+    );
+
+    await expect(loadAppConfig(configPath)).rejects.toThrow();
+  });
+
+  it("returns defaults when config file does not exist", async () => {
+    const config = await loadAppConfig("/nonexistent/path/karya.json");
+    expect(config.backend?.type).toBe("sqlite");
+  });
+
   it("rejects backend.ssl when backend is sqlite", async () => {
     await expect(setAppConfigValue("backend.ssl", "verify-full")).rejects.toThrow(
       "backend.ssl only applies to pg backend; set backend.connectionString first",

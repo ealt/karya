@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import type { Pool } from "pg";
 import { createPool, PgBackend } from "../../../src/core/backends/pg.js";
+import { SCHEMA_VERSION } from "../../../src/shared/constants.js";
 import { makeTask, makeUser } from "../../helpers/factories.js";
 
 const pgUrl = process.env.KARYA_TEST_PG_URL;
@@ -144,6 +145,42 @@ describe("PgBackend row parsing", () => {
       closedAt: null,
     });
     expect(typeof task?.openedAt).toBe("string");
+  });
+});
+
+describe("PgBackend.initialize", () => {
+  it("skips DDL when schema version matches", async () => {
+    const pool = makeMockPool();
+
+    // information_schema.tables query — karya_meta exists
+    pool.query.mockResolvedValueOnce({
+      rows: [{ table_name: "karya_meta" }, { table_name: "users" }, { table_name: "tasks" }, { table_name: "task_relations" }],
+    });
+    // schema_version query
+    pool.query.mockResolvedValueOnce({
+      rows: [{ value: String(SCHEMA_VERSION) }],
+    });
+
+    const backend = new PgBackend(pool as unknown as Pool);
+    await backend.initialize();
+
+    // Only the two SELECT queries should have been issued — no DDL
+    expect(pool.query).toHaveBeenCalledTimes(2);
+  });
+
+  it("runs DDL when no tables exist", async () => {
+    const pool = makeMockPool();
+
+    // information_schema.tables query — empty database
+    pool.query.mockResolvedValueOnce({ rows: [] });
+    // All subsequent DDL calls succeed
+    pool.query.mockResolvedValue({ rows: [] });
+
+    const backend = new PgBackend(pool as unknown as Pool);
+    await backend.initialize();
+
+    // First SELECT + createSchema DDL calls
+    expect(pool.query.mock.calls.length).toBeGreaterThan(2);
   });
 });
 

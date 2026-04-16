@@ -107,14 +107,16 @@ const DEFAULT_APP_CONFIG: AppConfig = {
 };
 
 export async function loadAppConfig(path = getAppConfigPath()): Promise<AppConfig> {
+  let raw: string;
   try {
-    const raw = await readFile(path, "utf8");
-    const parsed = JSON.parse(raw) as Record<string, unknown>;
-    const merged = { ...DEFAULT_APP_CONFIG, ...parsed };
-    return AppConfigSchema.parse(merged);
+    raw = await readFile(path, "utf8");
   } catch {
     return { ...DEFAULT_APP_CONFIG };
   }
+
+  const parsed = JSON.parse(raw) as Record<string, unknown>;
+  const merged = { ...DEFAULT_APP_CONFIG, ...parsed };
+  return AppConfigSchema.parse(merged);
 }
 
 export async function saveAppConfig(patch: Record<string, unknown>, path = getAppConfigPath()): Promise<void> {
