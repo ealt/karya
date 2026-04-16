@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [2.0.3] - 2026-04-16
+
+### Fixed
+
+- `PgBackend.initialize()` no longer runs DDL when schema version already
+  matches, so PostgreSQL users with DML-only privileges can connect without
+  `CREATE` permission on the schema
+- `loadAppConfig()` now surfaces Zod validation errors instead of silently
+  falling back to SQLite defaults when the config file exists but contains
+  invalid values
+- Zod schemas for `UserSchema` and `TaskSchema` now coerce `Date` objects to
+  ISO strings, preventing validation failures when the `pg` driver returns
+  `TIMESTAMPTZ` values as `Date` instances
+- `karya list` and `karya show` now display user aliases instead of raw user
+  IDs for owner and assignee fields
+
 ## [2.0.2] - 2026-03-26
 
 ### Fixed
@@ -121,7 +137,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - JSON export/import for portability
 - Legacy JSON file migration path
 
-[Unreleased]: https://github.com/ealt/karya/compare/v2.0.2...HEAD
+[Unreleased]: https://github.com/ealt/karya/compare/v2.0.3...HEAD
+[2.0.3]: https://github.com/ealt/karya/compare/v2.0.2...v2.0.3
 [2.0.2]: https://github.com/ealt/karya/compare/v2.0.1...v2.0.2
 [2.0.1]: https://github.com/ealt/karya/compare/v2.0.0...v2.0.1
 [2.0.0]: https://github.com/ealt/karya/compare/v1.0.0...v2.0.0
