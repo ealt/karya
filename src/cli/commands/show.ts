@@ -10,10 +10,16 @@ export function registerShowCommand(program: Command, runtime: CliRuntime): void
     .action(async (id: string, _options: Record<string, boolean | undefined>, command: Command) => {
       await runtime.runCommand(command, async (context) => {
         const detail = await context.store.showTask(id);
+        let message: string | undefined;
+        if (context.config.format === "human") {
+          const users = await context.userStore.listUsers(true);
+          const aliasMap = new Map(users.map((u) => [u.id, u.alias]));
+          message = formatTaskDetail(detail, (uid) => aliasMap.get(uid) ?? uid);
+        }
         return {
           ok: true,
           data: detail,
-          message: context.config.format === "human" ? formatTaskDetail(detail) : undefined,
+          message,
         };
       });
     });

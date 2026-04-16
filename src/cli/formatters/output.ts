@@ -33,21 +33,28 @@ export function render(output: CommandOutput, format: OutputFormat): void {
   }
 }
 
-export function formatTaskLine(task: Record<string, unknown>): string {
+export type AliasResolver = (id: string) => string;
+
+export function formatTaskLine(task: Record<string, unknown>, resolveAlias?: AliasResolver): string {
   const id = String(task.id);
   const priority = String(task.priority);
   const project = String(task.project);
   const title = String(task.title);
-  const ownerId = typeof task.ownerId === "string" && task.ownerId.length > 0 ? ` owner=${task.ownerId}` : "";
-  const assigneeId = typeof task.assigneeId === "string" && task.assigneeId.length > 0 ? ` assignee=${task.assigneeId}` : "";
+  const resolve = resolveAlias ?? String;
+  const ownerId = typeof task.ownerId === "string" && task.ownerId.length > 0 ? ` owner=${resolve(task.ownerId)}` : "";
+  const assigneeId = typeof task.assigneeId === "string" && task.assigneeId.length > 0 ? ` assignee=${resolve(task.assigneeId)}` : "";
   const closedAt = typeof task.closedAt === "string" && task.closedAt.length > 0 ? ` closedAt=${task.closedAt}` : "";
   return `${id}  ${priority}  ${project}  ${title}${ownerId}${assigneeId}${closedAt}`;
 }
 
-export function formatTaskDetail(detail: {
-  task: Record<string, unknown>;
-  relations: Array<{ sourceId: string; targetId: string; type: string }>;
-}): string {
+export function formatTaskDetail(
+  detail: {
+    task: Record<string, unknown>;
+    relations: Array<{ sourceId: string; targetId: string; type: string }>;
+  },
+  resolveAlias?: AliasResolver,
+): string {
+  const resolve = resolveAlias ?? String;
   const lines = [
     `id: ${String(detail.task.id)}`,
     `title: ${String(detail.task.title)}`,
@@ -60,10 +67,10 @@ export function formatTaskDetail(detail: {
   }
 
   if (detail.task.ownerId) {
-    lines.push(`ownerId: ${String(detail.task.ownerId)}`);
+    lines.push(`owner: ${resolve(String(detail.task.ownerId))}`);
   }
   if (detail.task.assigneeId) {
-    lines.push(`assigneeId: ${String(detail.task.assigneeId)}`);
+    lines.push(`assignee: ${resolve(String(detail.task.assigneeId))}`);
   }
   if (Array.isArray(detail.task.tags)) {
     lines.push(`tags: ${(detail.task.tags as string[]).join(", ") || "(none)"}`);

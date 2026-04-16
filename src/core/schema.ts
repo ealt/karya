@@ -5,13 +5,18 @@ export const UserTypeSchema = z.enum(["human", "agent"]);
 export const PrioritySchema = z.enum(["P0", "P1", "P2", "P3"]);
 export const RelationTypeSchema = z.enum(["parent", "blocks"]);
 
+const isoDatetime = z.union([
+  z.string().datetime(),
+  z.date().transform((d) => d.toISOString()),
+]);
+
 export const UserSchema = z.object({
   id: z.string().length(8),
   name: z.string().min(1),
   alias: z.string().min(1),
   type: UserTypeSchema.default("human"),
-  createdAt: z.string().datetime(),
-  deactivatedAt: z.string().datetime().nullable().default(null),
+  createdAt: isoDatetime,
+  deactivatedAt: isoDatetime.nullable().default(null),
 });
 
 export const TaskSchema = z.object({
@@ -23,8 +28,8 @@ export const TaskSchema = z.object({
   ownerId: z.string().length(8).nullable().default(null),
   assigneeId: z.string().length(8).nullable().default(null),
   tags: z.array(z.string()).default([]),
-  openedAt: z.string().datetime(),
-  closedAt: z.string().datetime().nullable().default(null),
+  openedAt: isoDatetime,
+  closedAt: isoDatetime.nullable().default(null),
 });
 
 export const TaskRelationSchema = z.object({

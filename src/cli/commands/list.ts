@@ -71,7 +71,10 @@ export function registerListCommand(program: Command, runtime: CliRuntime): void
           };
         }
 
-        const lines = tasks.map((task) => formatTaskLine(task));
+        const users = await context.userStore.listUsers(true);
+        const aliasMap = new Map(users.map((u) => [u.id, u.alias]));
+        const resolveAlias = (id: string) => aliasMap.get(id) ?? id;
+        const lines = tasks.map((task) => formatTaskLine(task, resolveAlias));
         return {
           ok: true,
           message: lines.length > 0 ? lines.join("\n") : "No tasks found",

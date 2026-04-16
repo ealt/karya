@@ -47,6 +47,31 @@ describe("schema", () => {
     expect("updatedBy" in parsed).toBe(false);
   });
 
+  it("coerces Date objects to ISO strings in UserSchema", () => {
+    const user = UserSchema.parse({
+      id: "abcd1234",
+      name: "Eric Alt",
+      alias: "ealt",
+      createdAt: new Date("2026-03-25T00:00:00.000Z"),
+      deactivatedAt: new Date("2026-03-26T00:00:00.000Z"),
+    });
+
+    expect(user.createdAt).toBe("2026-03-25T00:00:00.000Z");
+    expect(user.deactivatedAt).toBe("2026-03-26T00:00:00.000Z");
+  });
+
+  it("coerces Date objects to ISO strings in TaskSchema", () => {
+    const task = TaskSchema.parse({
+      id: "task1234",
+      title: "Test",
+      openedAt: new Date("2026-03-25T00:00:00.000Z"),
+      closedAt: new Date("2026-03-25T01:00:00.000Z"),
+    });
+
+    expect(task.openedAt).toBe("2026-03-25T00:00:00.000Z");
+    expect(task.closedAt).toBe("2026-03-25T01:00:00.000Z");
+  });
+
   it("parses relation schema", () => {
     const relation = TaskRelationSchema.parse({
       sourceId: "task1234",
